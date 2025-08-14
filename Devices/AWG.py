@@ -71,6 +71,34 @@ class SDG1060X():
         # Load waveform on given channel
         self.device.write(f"C{channel}:ARWV NAME,{name};")
         self.device.write(f"C{channel}:SRATE MODE,TARB,VALUE,{int(samplerate)},INTER,LINE")
+        
+    def burst(self, channel, enabled, edge = "RISE", N = 1):
+        """
+        Set up burst mode.
+
+        Parameters
+        ----------
+        channel : int
+            1 or 2. Selects channel to act on.
+        enabled : bool
+            Whether burst mode should be enabled.
+        edge : string, optional
+            Sets the trigger mode. "RISE" or "FALL". The default is "RISE".
+        N : int or string, optional
+            Sets number of times the waveform should be repeated after the
+            trigger. Accepts an int or "INF" for infinite. The default is 1.
+
+        Returns
+        -------
+        None.
+
+        """
+        if enabled:
+            self.device.write(
+                f"C{channel}:BTWV STATE,ON,TSRS,EXT,EDGE,{edge},TIME,{N}"
+            )
+        else:
+            self.device.write(f"C{channel}:BTWV STATE,OFF")
 
 def seq_to_waveforms(seq, samplerate):
     """
@@ -166,6 +194,8 @@ def vis_sequence_equidistant(seq):
     -------
     None.
     """
+    # Get number of steps
+    n = seq.shape[0]
     
     # Initialize arrays
     L = np.array([])
@@ -191,17 +221,27 @@ def vis_sequence_equidistant(seq):
     plt.fill_between(ts, I + 1.4, 1.4, alpha = 0.5)
     plt.plot(ts, Q + 0.2, label = "Q")
     plt.fill_between(ts, Q + 0.2, 0.2, alpha = 0.5)
-    plt.gca().set(yticklabels=[], yticks=[], xticklabels=[])
+    plt.gca().set(
+        yticklabels=["Q", "I", "L"],
+        yticks=[0.7, 1.9, 3.1],
+        xticklabels=[],
+        xticks = range(n + 1)
+    )
     plt.ylim(0.1, 3.7)
     
-    #plt.legend()
-    plt.text(-0.7, 0.7, "Q", va = 'center')
-    plt.text(-0.7, 1.9, "I", va = 'center')
-    plt.text(-0.7, 3.1, "L", va = 'center')
     
-    for (i, row) in enumerate(seq.iterrows()):
-        t = row[1]["time_us"]
-        plt.text(i + 0.5, -0.1, f"{t} us", ha = 'center')
+    if n < 8:
+        print("Horizontal branch entered")
+        for (i, row) in enumerate(seq.iterrows()):
+            print("inside for loop")
+            t = row[1]["time_us"]
+            plt.text(i + 0.5, -0.1, f"{t} us", ha = 'center')
+    else:
+        for (i, row) in enumerate(seq.iterrows()):
+            t = row[1]["time_us"]
+            plt.text(i + 0.5, 0.05, f"{t} us", ha = 'center',
+                     rotation = 'vertical', va = 'top')
+            
         
-    plt.show()
+    return plt.show()
     return None
