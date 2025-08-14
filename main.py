@@ -30,23 +30,18 @@ rm = pyvisa.ResourceManager()
 sequence = pd.DataFrame(
     columns = ["time_us", "L", "I", "Q"],
     data = [
-        [10,  True,  False, False],
-        [15,  False, True,  False],
-        [5,   False, True,  True ],
-        [8,   True,  False, True ],
-        [0.5, True,  True,  False],
-        [2,   False, False, False],
-        [0.1, True,  True,  True ],
-        [2,   False, False, False],
-        [10,  True,  False, False],
-        [15,  False, True,  False],
-        [5,   False, True,  True ],
-        [8,   True,  False, True ],
-        [0.5, True,  True,  False],
-        [2,   False, False, False],
-        [0.1, True,  True,  True ],
-        [2,   False, False, False],
+        [0.1,  True,  False, False],
+        [10,  False,  False, False],
+        [20,  True,  False, False],
+        [10,  False,  False, False],
+        [30,  True,  False, False],
     ]
 )
 
-Devices.AWG.vis_sequence_equidistant(sequence)
+AWG1 = Devices.AWG.SDG1060X(rm, 'USB0::0xF4EC::0x1103::SDG1XDDC801291::INSTR')
+AWG2 = Devices.AWG.SDG1060X(rm, 'USB0::0xF4EC::0x1103::SDG1XDDC801272::INSTR')
+
+L, I, Q = Devices.AWG.seq_to_waveforms(sequence, 30e6)
+
+sent = AWG1.set_waveform(L, 1, samplerate=30e6, amp = 5, name = "test")
+sent

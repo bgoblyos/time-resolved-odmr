@@ -47,7 +47,7 @@ class SDG1060X():
 
         """
         
-        self.device = rm.open(address, query_delay=0.25)
+        self.device = rm.open_resource(address, query_delay=0.25)
         # increase timeout to 10s to allow large transfers
         self.device.timeout = 10000
         # set up clock source
@@ -61,16 +61,41 @@ class SDG1060X():
             
     def set_waveform(self, waveform, channel, samplerate = 1e6, amp = 1.0, name = "Remote"):
         # Normalize to [-1, 1] with no offset
-        waveform /= np.max(np.abs(waveform))
+        factor = np.max(np.abs(waveform))
+        if factor != 0:
+            waveform /= factor
+            
+        # The AWG seems to only accept sequences that are 2^k-2 long,
+        # so we need to pad the waveform to the nearest such length.
+        
+        # Store the length+2 for convenience
+        n = len(waveform) + 2
+        
+        # If n is not a power of two, perform padding
+        if not (n & (n-1) == 0):
+            # Find target length (next smallest power of two)
+            # Always send at lest 2^16-2 points, otherwise the AWG won't work
+            tgt = np.maximum(int(2**(np.ceil(np.log2(n)))), 0x10000)
+            # Calculate remaining elements that need to be added. Note that we
+            # use n here (which is len + 2), so the total length will be 2^k-2
+            rem = tgt - n
+            waveform = np.append(waveform, np.zeros(rem))
+        
         # Scale to [-2^15, 2^15-1] and discretize to signed 16 bit int
-        waveform = (0x7FFF * waveform).astype('int16')
+        waveform = (0x7FFF * waveform).astype('int')
         # Upload waveform to device
+        # self.device.write_binary_values('C1:WVDT WVNM,remote,FREQ,1.0,TYPE,8,AMPL,1.0,OFST,0.0,PHASE,0.0,WAVEDATA,', waveform, datatype='i', is_big_endian=False)
+        # self.device.write("C1:ARWV NAME,remote")
+        # self.device.write("C1:SRATE MODE,TARB,VALUE,%f,INTER,LINE" % samplerate)
+    
         self.device.write_binary_values(
             f'C1:WVDT WVNM,{name},FREQ,1.0,TYPE,8,AMPL,{amp},OFST,0.0,PHASE,0.0,WAVEDATA,',
             waveform, datatype='i', is_big_endian=False)
         # Load waveform on given channel
-        self.device.write(f"C{channel}:ARWV NAME,{name};")
-        self.device.write(f"C{channel}:SRATE MODE,TARB,VALUE,{int(samplerate)},INTER,LINE")
+        self.device.write(f"C{channel}:ARWV NAME,{name}")
+        self.device.write(f"C{channel}:SRATE MODE,TARB,VALUE,%f,INTER,LINE" % samplerate)
+        
+        return waveform
         
     def burst(self, channel, enabled, edge = "RISE", N = 1):
         """
@@ -124,8 +149,9 @@ def seq_to_waveforms(seq, samplerate):
         Decoded binary signal for modulating the Q channel.
 
     """
-    # Convert samples/s to samples/us
-    multiplier = samplerate / 1e6
+    # Convert samples/s to samples/us. For some reason the AWG wants 4 times
+    # as many points, otherwise the timescale is off.
+    multiplier = 4 * samplerate / 1e6
     
     # Initialize arrays
     L = np.array([])
