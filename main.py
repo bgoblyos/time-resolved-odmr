@@ -38,10 +38,15 @@ sequence = pd.DataFrame(
     ]
 )
 
-AWG1 = Devices.AWG.SDG1060X(rm, 'USB0::0xF4EC::0x1103::SDG1XDDC801291::INSTR')
-AWG2 = Devices.AWG.SDG1060X(rm, 'USB0::0xF4EC::0x1103::SDG1XDDC801272::INSTR')
+#AWG1 = Devices.AWG.SDG1060X(rm, 'USB0::0xF4EC::0x1103::SDG1XDDC801291::INSTR')
+#AWG2 = Devices.AWG.SDG1060X(rm, 'USB0::0xF4EC::0x1103::SDG1XDDC801272::INSTR')
 
-L, I, Q = Devices.AWG.seq_to_waveforms(sequence, 30e6)
+#L, I, Q = Devices.AWG.seq_to_waveforms(sequence, 30e6)
 
-sent = AWG1.set_waveform(L, 1, samplerate=30e6, amp = 5, name = "test")
-sent
+#sent = AWG1.set_waveform(L, 1, samplerate=30e6, amp = 5, name = "test")
+#sent
+
+AWG = Devices.AWG.SDG1060X(None, 'DUMMY')
+
+AWG.burst_int(1)
+AWG.burst_ext(2)

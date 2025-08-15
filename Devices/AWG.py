@@ -13,12 +13,11 @@ You should have received a copy of the GNU General Public License along with
 this program. If not, see https://www.gnu.org/licenses/.
 """
 
-import pyvisa
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-
+from Devices.Dummy import Dummy
 """
 Class for controlling Siglent SDG 1062X arbitrary waveform generator
 Uses modified GPL-3 licensed code from https://github.com/AI5GW/SIGLENT,
@@ -46,10 +45,13 @@ class SDG1060X():
         None.
 
         """
-        
-        self.device = rm.open_resource(address, query_delay=0.25)
-        # increase timeout to 10s to allow large transfers
-        self.device.timeout = 10000
+        if address == "DUMMY":
+            self.device = Dummy()
+        else:
+            self.device = rm.open_resource(address, query_delay=0.25)
+            # increase timeout to 10s to allow large transfers
+            self.device.timeout = 10000
+            
         # set up clock source
         self.set_oscillator(internal_oscillator)
         
@@ -59,7 +61,71 @@ class SDG1060X():
         else:
             self.device.write("ROSC EXT;ROSC 10MOUT,OFF")
             
-    def set_waveform(self, waveform, channel, samplerate = 1e6, amp = 1.0, name = "Remote"):
+    def output(self, channel, state = True, load = 50, polarity = "NOR"):
+        """
+        Set the output of the given channel.
+
+        Parameters
+        ----------
+        channel : int
+            Channel to act on. 1 or 2.
+        state : bool, optional
+            Sets whether to enable output. The default is True.
+        load : int, optional
+            Output impedance in Ohms. The default is 50.
+        polarity : str, optional
+            Output polarity. "NOR" is normal and "INVT" is inverted.
+            The default is "NOR".
+
+        Returns
+        -------
+        None.
+
+        """
+        
+        cmd = (
+            f"C{channel}:OUTP " +
+            "ON," if state else "OFF," +
+            f"LOAD,{load}," +
+            f"PLRT,{polarity}"
+        )
+        self.device.write(cmd)
+    def set_waveform(
+            self,
+            channel, 
+            waveform,
+            samplerate = 1e6,
+            amp = 1.0,
+            name = "Remote",
+            offset = 0.0
+    ):
+        """
+        Uploads and sets waveform to active.
+
+        Parameters
+        ----------
+        channel : int
+            Channel to act on. 1 or 2.
+        waveform : array of floats
+            Waveform to be displayed.
+        samplerate : float, optional
+            Samples per second. Affects how quickly the waveform is emitted.
+            The default is 1e6.
+        amp : float, optional
+            Waveform amplitude in V. The default is 1.0.
+        name : str, optional
+            Waveform name. Used for saving the waveform and is displayed on the
+            device. The default is "Remote".
+        offset : float, optional
+            Zero level offset in V. The default is 0.0.
+
+        Returns
+        -------
+        waveform : array of int16
+            Returns waveform as it was sent, including int16 stretching and
+            lengthwise padding.
+
+        """
         # Normalize to [-1, 1] with no offset
         factor = np.max(np.abs(waveform))
         if factor != 0:
@@ -72,9 +138,9 @@ class SDG1060X():
         n = len(waveform) + 2
         
         # If n is not a power of two, perform padding
-        if not (n & (n-1) == 0):
+        if n & (n-1) != 0:
             # Find target length (next smallest power of two)
-            # Always send at lest 2^16-2 points, otherwise the AWG won't work
+            # Always send at least 2^16-2 points, otherwise the AWG won't work
             tgt = np.maximum(int(2**(np.ceil(np.log2(n)))), 0x10000)
             # Calculate remaining elements that need to be added. Note that we
             # use n here (which is len + 2), so the total length will be 2^k-2
@@ -83,47 +149,135 @@ class SDG1060X():
         
         # Scale to [-2^15, 2^15-1] and discretize to signed 16 bit int
         waveform = (0x7FFF * waveform).astype('int')
-        # Upload waveform to device
+        
         # self.device.write_binary_values('C1:WVDT WVNM,remote,FREQ,1.0,TYPE,8,AMPL,1.0,OFST,0.0,PHASE,0.0,WAVEDATA,', waveform, datatype='i', is_big_endian=False)
         # self.device.write("C1:ARWV NAME,remote")
         # self.device.write("C1:SRATE MODE,TARB,VALUE,%f,INTER,LINE" % samplerate)
     
+        # Upload waveform to device
+        cmd = (
+            f"C{channel}:WVDT " +
+            f"WVNM,{name}," +
+            "FREQ,1.0," +
+            f"AMPL,{amp}," +
+            f"OFST,{offset}," +
+            "PHASE,0.0," +
+            f"LENGTH,{2*len(waveform)}," + # This may not be necessary
+            "WAVEDATA,"
+        )
         self.device.write_binary_values(
-            f'C1:WVDT WVNM,{name},FREQ,1.0,TYPE,8,AMPL,{amp},OFST,0.0,PHASE,0.0,WAVEDATA,',
-            waveform, datatype='i', is_big_endian=False)
+            cmd, waveform, datatype='i', is_big_endian=False)
+        
         # Load waveform on given channel
         self.device.write(f"C{channel}:ARWV NAME,{name}")
-        self.device.write(f"C{channel}:SRATE MODE,TARB,VALUE,%f,INTER,LINE" % samplerate)
+        self.device.write(
+            f"C{channel}:SRATE MODE,TARB,VALUE,%f,INTER,LINE" % samplerate)
         
         return waveform
         
-    def burst(self, channel, enabled, edge = "RISE", N = 1):
+    def burst_off(self, channel):
         """
-        Set up burst mode.
+        Disable burst mode
 
         Parameters
         ----------
         channel : int
-            1 or 2. Selects channel to act on.
-        enabled : bool
-            Whether burst mode should be enabled.
-        edge : string, optional
-            Sets the trigger mode. "RISE" or "FALL". The default is "RISE".
-        N : int or string, optional
-            Sets number of times the waveform should be repeated after the
-            trigger. Accepts an int or "INF" for infinite. The default is 1.
+            1 or 2. Selects channel on which to disable burst mode.
+
+        Returns
+        -------
+        None.
+        """
+        self.device.write(f"C{channel}:BTWV STATE,OFF")
+
+    def burst_int(self,
+                  channel,
+                  period = 0.001,
+                  delay = 0,
+                  phase = 0,
+                  n = 1,
+                  trig_out = "RISE",
+        ):
+        """
+        Enable burst mode with internal trigger.
+
+        Parameters
+        ----------
+        channel : int
+            Channel to act on. 1 or 2.
+        period : float, optional
+            Repetition period in seconds. The default is 0.001.
+        delay : float, optional
+            Trigger delay in seconds. The default is 0.
+        phase : float, optional
+            Starting phase in degrees. The default is 0.
+        n : int or str, optional
+            Number of waveforms to emit in each burst. Use 'INF' for
+            continous signal. The default is 1.
+        trig_out : str, optional
+            When to emit trigger out. Valid options are "OFF", "RISE" and
+            "FALL". The default is "RISE".
 
         Returns
         -------
         None.
 
         """
-        if enabled:
-            self.device.write(
-                f"C{channel}:BTWV STATE,ON,TSRS,EXT,EDGE,{edge},TIME,{N}"
-            )
-        else:
-            self.device.write(f"C{channel}:BTWV STATE,OFF")
+        
+        cmd = (
+            f"C{channel}:BTWV " +
+            "STATE,ON," +
+            "TRSR,INT," +
+            f"PRD,{period}," +
+            f"DLAY,{delay}," +
+            f"TRMD,{trig_out}," +
+            f"TIME,{n}"
+        )
+        
+        self.device.write(cmd)
+
+    def burst_ext(self,
+                 channel,
+                 delay = 0,
+                 phase = 0,
+                 n = 1,
+                 edge = "RISE",
+       ):
+       """
+       Enable burst mode with external trigger.
+
+       Parameters
+       ----------
+       channel : int
+           Channel to act on. 1 or 2.
+       delay : float, optional
+           Trigger delay in seconds. The default is 0.
+       phase : float, optional
+           Starting phase in degrees. The default is 0.
+       n : int or str, optional
+           Number of waveforms to emit in each burst. Use 'INF' for
+           continous signal. The default is 1.
+       edge : str, optional
+           When to trigger burst mode. Valid options are "RISE" and "FALL".
+           The default is "RISE".
+
+       Returns
+       -------
+       None.
+
+       """
+       
+       cmd = (
+           f"C{channel}:BTWV " +
+           "STATE,ON," +
+           "TRSR,EXT," +
+           f"DLAY,{delay}," +
+           f"EDGE,{edge}," +
+           f"TIME,{n}"
+       )
+       
+       self.device.write(cmd)
+
 
 def seq_to_waveforms(seq, samplerate):
     """
