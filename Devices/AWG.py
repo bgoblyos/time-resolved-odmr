@@ -23,7 +23,7 @@ Class for controlling Siglent SDG 1062X arbitrary waveform generator
 Uses modified GPL-3 licensed code from https://github.com/AI5GW/SIGLENT,
 copyright (C) 2022 Sebastian (AI5GW) <sebastian@baltic-lab.com>
 """
-class SDG1060X():
+class SDG1062X():
     def __init__(self, rm, address, internal_oscillator = True):
         """
         Initialize Siglent SDG 1062X instrument.
@@ -57,11 +57,13 @@ class SDG1060X():
         
     def set_oscillator(self, internal):
         if internal:
-            self.device.write("ROSC INT;ROSC 10MOUT,ON")
+            self.device.write("ROSC INT")
+            self.device.write("ROSC 10MOUT,ON")
         else:
-            self.device.write("ROSC EXT;ROSC 10MOUT,OFF")
+            self.device.write("ROSC EXT")
+            self.device.write("ROSC 10MOUT,OFF")
             
-    def output(self, channel, state = True, load = 50, polarity = "NOR"):
+    def output(self, channel, state = True, load = "HiZ", polarity = "NOR"):
         """
         Set the output of the given channel.
 
@@ -71,8 +73,8 @@ class SDG1060X():
             Channel to act on. 1 or 2.
         state : bool, optional
             Sets whether to enable output. The default is True.
-        load : int, optional
-            Output impedance in Ohms. The default is 50.
+        load : int or str, optional
+            Output impedance in Ohms or "HiZ". The default is "HiZ".
         polarity : str, optional
             Output polarity. "NOR" is normal and "INVT" is inverted.
             The default is "NOR".
@@ -83,13 +85,17 @@ class SDG1060X():
 
         """
         
+        # TODO: do not change parameter if not explicitly specified
+        
         cmd = (
             f"C{channel}:OUTP " +
-            "ON," if state else "OFF," +
+            ("ON," if state else "OFF,") +
             f"LOAD,{load}," +
             f"PLRT,{polarity}"
         )
+        
         self.device.write(cmd)
+    
     def set_waveform(
             self,
             channel, 
@@ -140,8 +146,8 @@ class SDG1060X():
         # If n is not a power of two, perform padding
         if n & (n-1) != 0:
             # Find target length (next smallest power of two)
-            # Always send at least 2^16-2 points, otherwise the AWG won't work
-            tgt = np.maximum(int(2**(np.ceil(np.log2(n)))), 0x10000)
+            # Always send at least 2^15-2 points, otherwise the AWG won't work
+            tgt = np.maximum(int(2**(np.ceil(np.log2(n)))), 0x8000)
             # Calculate remaining elements that need to be added. Note that we
             # use n here (which is len + 2), so the total length will be 2^k-2
             rem = tgt - n
@@ -163,6 +169,66 @@ class SDG1060X():
             f"OFST,{offset}," +
             "PHASE,0.0," +
             f"LENGTH,{2*len(waveform)}," + # This may not be necessary
+            "WAVEDATA,"
+        )
+        self.device.write_binary_values(
+            cmd, waveform, datatype='i', is_big_endian=False)
+        
+        # Load waveform on given channel
+        self.device.write(f"C{channel}:ARWV NAME,{name}")
+        self.device.write(
+            f"C{channel}:SRATE MODE,TARB,VALUE,%f,INTER,LINE" % samplerate)
+        
+        return waveform
+        
+    
+    def set_waveform_exact(
+            self,
+            channel,
+            waveform,
+            samplerate = 1e6,
+            amp = 10.0,
+            offset = 0.0,
+            name = 'Remote'
+        ):
+        """
+        Uploads and sets waveform to active. Only works with normalized
+        waveforms that are exactly 32766 elements long.
+
+        Parameters
+        ----------
+        channel : int
+            Channel to act on. 1 or 2.
+        waveform : array of floats
+            Waveform to be displayed.
+        samplerate : float, optional
+            Samples per second. Affects how quickly the waveform is emitted.
+            The default is 1e6.
+        amp : float, optional
+            Waveform amplitude in V. The default is 1.0.
+        name : str, optional
+            Waveform name. Used for saving the waveform and is displayed on the
+            device. The default is "Remote".
+        offset : float, optional
+            Zero level offset in V. The default is 0.0.
+
+        Returns
+        -------
+        waveform : array of int16
+            Returns waveform as it was sent, including int16 stretching and
+            lengthwise padding.
+
+        """
+        
+        waveform = (0x7FFF * waveform).astype('int16')
+        
+        cmd = (
+            f"C{channel}:WVDT " +
+            f"WVNM,{name}," +
+            "FREQ,1.0," +
+            f"AMPL,{amp}," +
+            f"OFST,{offset}," +
+            "PHASE,0.0," +
             "WAVEDATA,"
         )
         self.device.write_binary_values(
@@ -278,53 +344,185 @@ class SDG1060X():
        
        self.device.write(cmd)
 
-
-def seq_to_waveforms(seq, samplerate):
+class LIQ_SDG1062X():
     """
-    Decode 
-
-    Parameters
-    ----------
-    seq : pandas.DataFrame
-        DataFrame containing pulse sequence. Rows are read in order.
-        Expected columns: time_us (float, time in microseconds),
-        L (bool, laser enabled), I (bool, I enabled), Q (bool, Q enabled).
-    samplerate : float/int
-        Sample rate of the generated signal. This must match the sample rate of
-        the AWG. 1s/samplerate should be much smaller than the shortest pulse.
-
-    Returns
-    -------
-    L : Array of floats
-        Decoded binary signal for modulating the laser.
-    I : Array of floats
-        Decoded binary signal for modulating the I channel.
-    Q : Array of floats
-        Decoded binary signal for modulating the Q channel.
-
+    Class for modulating a laser and driving an IQ modulator using two Siglent
+    SDG 1062X arbitrary waveform generators.
+    The 10 MHz in/out and AUX in/out ports should be connected between devices:
+     AWG1       AWG2
+    10 MHz <-> 10 MHz
+     AUX   <->  AUX
     """
-    # Convert samples/s to samples/us. For some reason the AWG wants 4 times
-    # as many points, otherwise the timescale is off.
-    multiplier = 4 * samplerate / 1e6
-    
-    # Initialize arrays
-    L = np.array([])
-    I = np.array([])
-    Q = np.array([])
-    
-    # Iterate over dataframe rows and fill up waveforms
-    for row in seq.iterrows():
-        # Generate high signal of appropriate length
-        n = round(multiplier * row[1]["time_us"])
-        filled = np.ones(n)
+    def __init__(self, rm, addr1, addr2, delay = 3e-07):
+        """
+        INitialize LIQ modulator setup.
+
+        Parameters
+        ----------
+        rm : pyvisa.ResourceManager
+            PyVISA ResourceManager instance to use when
+            connecting to instruments.
+        addr1 : str
+            VISA resource locator of the primary AWG. This device will provide
+            the 10 MHz clock and will output the laser modulation signal on
+            channel 1. A trigger signal will also be emitted on AUX each time
+            the sequence starts.
+        addr2 : str
+            VISA resource locator of the secondary AWG. This device will use
+            an external 10 MHz clock and output the I and Q signals on channels
+            1 and 2 respectively. The sequences will be triggered externally
+            from AUX.
+        delay : float, optional
+            Delay between sending out the trigger from the primary AWG and the
+            start of the sequence. Used to compensate for delays between the
+            two devices. Needs to be calibrated to the actual setup.
+            The default is 3e-07.
+
+        Returns
+        -------
+        None.
+
+        """
         
-        # Append high or low signal depending on boolean value 
-        L = np.append(L, filled * row[1]["L"])
-        I = np.append(I, filled * row[1]["I"])
-        Q = np.append(Q, filled * row[1]["Q"])
+        self.awg1 = SDG1062X(rm, addr1, internal_oscillator=True)
+        self.awg2 = SDG1062X(rm, addr2, internal_oscillator=False)
+        self.delay = delay
         
-    return L, I, Q
+    def set_sequence(self,
+                     seq,
+                     amp = 10,
+                     burst_period = 0.001
+        ):
+        """
+        
+
+        Parameters
+        ----------
+        seq : TYPE
+            DESCRIPTION.
+        samplerate : TYPE, optional
+            DESCRIPTION. The default is 30e6.
+        amp : TYPE, optional
+            DESCRIPTION. The default is 10.
+        burst_period : TYPE, optional
+            DESCRIPTION. The default is 0.001.
+
+        Returns
+        -------
+        None.
+
+        """
+        # TODO: Update docstring
+        
+        # Disable all output
+        self.awg1.output(1, state = False)
+        self.awg2.output(1, state = False)
+        self.awg2.output(2, state = False)
+        
+        # Decode DataFrame into individual channels
+        L, I, Q, samplerate = seq_to_waveforms(seq)
+        
+        # Upload L channel
+        Lsent = self.awg1.set_waveform_exact(
+            1, L, samplerate=samplerate, amp = amp, name = "L")
+        # Set up burst mode on L channel
+        self.awg1.burst_int(1, period = burst_period, delay=self.delay)
+        
+        # Upload I channel
+        Isent = self.awg2.set_waveform_exact(
+            1, I, samplerate=samplerate, amp = amp, name = "I")
+        # Set up burst mode on I channel
+        self.awg2.burst_ext(1)
+        
+        # Upload Q channel
+        Qsent = self.awg2.set_waveform_exact(
+            2, Q, samplerate=samplerate, amp = amp, name = "I")
+        # Set up burst mode on I channel
+        self.awg2.burst_ext(2)
+        
+        # Enable all outputs
+        self.awg1.output(1, state = True, load = "HiZ")
+        self.awg2.output(1, state = True, load = "HiZ")
+        self.awg2.output(2, state = True, load = "HiZ")
+        
+        return Lsent, Isent, Qsent
+        
+    def enable(self):
+        self.awg1.output(1, state = True, load = "HiZ")
+        self.awg2.output(1, state = True, load = "HiZ")
+        self.awg2.output(2, state = True, load = "HiZ")
+        
+    def disable(self):
+        self.awg1.output(1, state = False)
+        self.awg2.output(1, state = False)
+        self.awg2.output(2, state = False)
+
+def seq_to_waveforms(seq):
+    # TODO: Add docstring
     
+    # Set number of points. The ideal seems to be 2^15-2 = 32766
+    # This will be downsampled to 16384 by the AWG, but sending that value to
+    # begin with doesn't work.
+    p =  0x7FFE
+    
+    # Calculate the minimum amount of time it takes produce p points with
+    # maximum sampling rate. The AWG will downsample the series by a factor of
+    # 2, so we have to divide the numbe of points accordingly
+    tmin = (p/2)/30e6
+
+    # Get how long each step in the sequence will take in seconds
+    ts = seq["time_us"].values * 1e-6
+    # Calculate the endpoint of each step in time
+    boundaries = np.cumsum(ts)
+
+    # Round up the time to Tmin, otherwise we need a sampling rate higher than
+    # 30 MSa/s, resulting in a stretched signal
+    t = np.maximum(boundaries[-1], tmin)
+    # Generate p equidistant points in the time interval
+    samples = np.linspace(0, t, p, endpoint = False) # Generate sample points
+    # Calculate the final sampling rate, accounting for downsampling
+    samplerate = (p/2)/t
+    
+    # Display the temporal resolution. This might be moved to a return value.
+    timeres = t / (p/2)
+    print(timeres)
+    if timeres > 1:
+        print(f"Temporal resolution: {timeres:.4g} s")
+    elif timeres > 1e-3:
+        print(f"Temporal resolution: {(timeres/1000):.4g} ms")
+    elif timeres > 1e-6:
+        print(f"Temporal resolution: {(timeres*1e6):.4g} us")
+    else:
+        print(f"Temporal resolution: {(timeres*1e9):.4g} ns")
+    
+    # Fill all channels with zeros
+    L = np.zeros(p)
+    I = np.zeros(p)
+    Q = np.zeros(p)
+
+    # Iterate over all sample points
+    for (i, sample) in enumerate(samples):
+       # Figure out which step the sample point falls under. This is done by
+       # finding the first region where the endpoint is greater than the
+       # sample. For instance, if the sample is 30us and we have 2 20us steps,
+       # Step #2 is chosen because 20 is not greater than 30, but 40 is.
+       region = np.where(boundaries > sample)[0]
+       # If the region isn't empty (which can happen if the time was rounded up
+       # and the last interval is unaccounted for), check which channels should
+       # be on and set their value to 1.
+       if len(region) > 0:
+           if seq["L"].values[region[0]]:
+               L[i] = 1.0
+           if seq["I"].values[region[0]]:
+               I[i] = 1.0
+           if seq["Q"].values[region[0]]:
+               Q[i] = 1.0
+       else:
+           # We can break out of the for loop because all subsequent sample 
+           # points will be in the padding region, which is already 0 filled.
+           break
+
+    return L, I, Q, samplerate
 
 def vis_sequence_proportional(seq):
     """
