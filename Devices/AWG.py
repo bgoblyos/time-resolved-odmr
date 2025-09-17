@@ -344,6 +344,7 @@ class SDG1062X():
        
        self.device.write(cmd)
 
+# TODO: Adapt this to the new setup (two laser channels, common trigger)
 class LIQ_SDG1062X():
     """
     Class for modulating a laser and driving an IQ modulator using two Siglent
@@ -457,7 +458,7 @@ class LIQ_SDG1062X():
         self.awg2.output(1, state = False)
         self.awg2.output(2, state = False)
 
-def seq_to_waveforms(seq):
+def seq_to_waveforms(seq, lock_in_hz):
     # TODO: Add docstring
     
     # Set number of points. The ideal seems to be 2^15-2 = 32766
@@ -468,7 +469,12 @@ def seq_to_waveforms(seq):
     # Calculate the minimum amount of time it takes produce p points with
     # maximum sampling rate. The AWG will downsample the series by a factor of
     # 2, so we have to divide the numbe of points accordingly
-    tmin = (p/2)/30e6
+    # Also stretch it out to fill out most of the lock-in period.
+    # Without this, the AWG will emit the RMS during downtimes, which is bad.
+    tmin = np.maximum(
+        (p/2)/30e6,
+        0.98*1/lock_in_hz
+    )
 
     # Get how long each step in the sequence will take in seconds
     ts = seq["time_us"].values * 1e-6
@@ -489,7 +495,7 @@ def seq_to_waveforms(seq):
     if timeres > 1:
         print(f"Temporal resolution: {timeres:.4g} s")
     elif timeres > 1e-3:
-        print(f"Temporal resolution: {(timeres/1000):.4g} ms")
+        print(f"Temporal resolution: {(timeres*1000):.4g} ms")
     elif timeres > 1e-6:
         print(f"Temporal resolution: {(timeres*1e6):.4g} us")
     else:

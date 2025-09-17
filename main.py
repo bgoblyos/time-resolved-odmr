@@ -27,35 +27,23 @@ import pandas as pd
 #%% Device setup
 rm = pyvisa.ResourceManager()
 
-LIQ = Devices.AWG.LIQ_SDG1062X(
-    rm,
-    addr1 = 'USB0::0xF4EC::0x1103::SDG1XDDC801291::INSTR',
-    addr2 = 'USB0::0xF4EC::0x1103::SDG1XDDC801272::INSTR',
-    delay = 3.15e-7
-)
+awg1 = Devices.AWG.SDG1062X(rm, 'USB0::0xF4EC::0x1103::SDG1XDDC801291::INSTR', internal_oscillator=True)
+#awg2 = Devices.AWG.SDG1062X(rm, 'USB0::0xF4EC::0x1103::SDG1XDDC801272::INSTR', internal_oscillator=False)
 
 #%% Upload waveforms
 
 sequence = pd.DataFrame(
     columns = ["time_us", "L", "I", "Q"],
     data = [
-        [2000,  True,  True, True],
-        [100,  True,  False, False],
-        [100,  False,  True, False],
-        [100,  False,  False, True],
-        #[10,  True,  True, True],
+        [0.5e6 / 247.2, True, False, False],
+        [40,  False,  True, True],
     ]
 )
 
+L, I, Q, samplerate = Devices.AWG.seq_to_waveforms(sequence, 247.2)
 
-sequence = pd.DataFrame(
-    columns = ["time_us", "L", "I", "Q"],
-    data = [
-        [1000,  True,  True, True],
-        [200,  False,  False, False],
-        [200,  True,  True, True],
-        [1000,  False,  False, False],
-    ]
-)
 
-L, I, Q = LIQ.set_sequence(sequence, burst_period=0.001)
+awg1.set_waveform_exact(
+    1, L, samplerate=samplerate, amp = 1, name = "L")
+
+awg1.burst_ext(1)
