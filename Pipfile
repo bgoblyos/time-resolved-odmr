@@ -11,6 +11,8 @@ pyvisa = "*"
 pandas = "*"
 
 [dev-packages]
+spyder = "*"
+spyder-terminal = "*"
 
 [requires]
 python_version = "3.13"
