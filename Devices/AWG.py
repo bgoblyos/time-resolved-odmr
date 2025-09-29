@@ -491,7 +491,7 @@ def seq_to_waveforms(seq, lock_in_hz):
     
     # Display the temporal resolution. This might be moved to a return value.
     timeres = t / (p/2)
-    print(timeres)
+    #print(timeres)
     if timeres > 1:
         print(f"Temporal resolution: {timeres:.4g} s")
     elif timeres > 1e-3:
@@ -502,7 +502,8 @@ def seq_to_waveforms(seq, lock_in_hz):
         print(f"Temporal resolution: {(timeres*1e9):.4g} ns")
     
     # Fill all channels with zeros
-    L = np.zeros(p)
+    Lp = np.zeros(p)
+    Ln = np.zeros(p)
     I = np.zeros(p)
     Q = np.zeros(p)
 
@@ -518,7 +519,8 @@ def seq_to_waveforms(seq, lock_in_hz):
        # be on and set their value to 1.
        if len(region) > 0:
            if seq["L"].values[region[0]]:
-               L[i] = 1.0
+               Lp[i] = 1.0
+               Ln[i] = -1.0
            if seq["I"].values[region[0]]:
                I[i] = 1.0
            if seq["Q"].values[region[0]]:
@@ -528,7 +530,7 @@ def seq_to_waveforms(seq, lock_in_hz):
            # points will be in the padding region, which is already 0 filled.
            break
 
-    return L, I, Q, samplerate
+    return Lp, Ln, I, Q, samplerate
 
 def vis_sequence_proportional(seq):
     """

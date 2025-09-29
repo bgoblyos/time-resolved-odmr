@@ -23,6 +23,7 @@ import pyvisa
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import time
 
 #%% Device setup
 rm = pyvisa.ResourceManager()
@@ -30,20 +31,53 @@ rm = pyvisa.ResourceManager()
 awg1 = Devices.AWG.SDG1062X(rm, 'USB0::0xF4EC::0x1103::SDG1XDDC801291::INSTR', internal_oscillator=True)
 #awg2 = Devices.AWG.SDG1062X(rm, 'USB0::0xF4EC::0x1103::SDG1XDDC801272::INSTR', internal_oscillator=False)
 
+lock = rm.open_resource('GPIB0::8::INSTR')
+float(lock.query("SNAP ? 3,4").split(',')[0])
+
 #%% Upload waveforms
 
-sequence = pd.DataFrame(
-    columns = ["time_us", "L", "I", "Q"],
-    data = [
-        [0.5e6 / 247.2, True, False, False],
-        [40,  False,  True, True],
-    ]
-)
+tr = 3
+ti = 20
+fl = 66.14
 
-L, I, Q, samplerate = Devices.AWG.seq_to_waveforms(sequence, 247.2)
+taus = np.linspace(40,2000,30)
+results = np.zeros(taus.shape)
+thetas = np.zeros(taus.shape)
+for i, tau in enumerate(taus):
+    print(f"Begin step {i+1}, tau = {tau}")
+    sequence = pd.DataFrame(
+        columns = ["time_us", "L", "I", "Q"],
+        data = [
+            [ti, True, False, False],
+            [5e5/fl - ti,  False,  True, True],
+            [ti, True, False, False],
+            [tau, False, False, False],
+            [tr, True, False, False],
+            [10, False, False, False],
+        
+        ]
+    )
+
+    Lp, Ln, I, Q, samplerate = Devices.AWG.seq_to_waveforms(sequence, fl)
 
 
-awg1.set_waveform_exact(
-    1, L, samplerate=samplerate, amp = 1, name = "L")
+    awg1.set_waveform_exact(
+        1, Lp, samplerate=samplerate, amp = 20, name = "Lp")
+    awg1.set_waveform_exact(
+        2, Ln, samplerate=samplerate, amp = 20, name = "Ln")
 
-awg1.burst_ext(1)
+    awg1.burst_ext(1)
+    awg1.burst_ext(2)
+    
+    lock.write("OFLT 0")
+    time.sleep(1)
+    lock.write("OFLT 9")
+    time.sleep(4)
+    resp = lock.query("SNAP ? 3,4").split(',')
+    results[i] = float(resp[0])
+    thetas[i] = float(resp[1])
+    
+plt.plot(taus, results)
+plt.xlabel("Tau (us)")
+plt.ylabel("Lock-in signal (mV)")
+plt.show()
