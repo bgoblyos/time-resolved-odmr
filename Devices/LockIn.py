@@ -13,14 +13,17 @@ You should have received a copy of the GNU General Public License along with
 this program. If not, see https://www.gnu.org/licenses/.
 """
 
+import pandas as pd
+
 class SR830M():
     def __init__(self, rm, address):
         self.device = rm.open_resource(address)
+        self.device.timeout = 100000
 
         self.bufferSize = 16383
 
         self.sensDF = pd.DataFrame(
-            columns = ["i", "V", "Vstr", "I", "Istr"]
+            columns = ["i", "V", "Vstr", "I", "Istr"],
             data = [
                 [0,  2.0e-09, "2 nV",   2.0e-15, "2 fA"   ],
                 [1,  5.0e-09, "5 nV",   5.0e-15, "5 fA"   ],
@@ -108,5 +111,5 @@ class SR830M():
             labels = ["X", "Y", "R", "Theta", "Ref"]
             data = self.device.query("SNAP? 1,2,3,4,9").split(',')
 
-        return {labels[i]: float(data[i]) for i in range(len(data))}
+        return {labels[i]: float(data[i]) for i in range(len(labels))}
 

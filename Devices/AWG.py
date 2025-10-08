@@ -458,79 +458,107 @@ class LIQ_SDG1062X():
         self.awg2.output(1, state = False)
         self.awg2.output(2, state = False)
 
-def seq_to_waveforms(seq, lock_in_hz):
-    # TODO: Add docstring
-    
+def seq_to_waveforms(seq):
     # Set number of points. The ideal seems to be 2^15-2 = 32766
     # This will be downsampled to 16384 by the AWG, but sending that value to
     # begin with doesn't work.
     p =  0x7FFE
-    
-    # Calculate the minimum amount of time it takes produce p points with
-    # maximum sampling rate. The AWG will downsample the series by a factor of
-    # 2, so we have to divide the numbe of points accordingly
-    # Also stretch it out to fill out most of the lock-in period.
-    # Without this, the AWG will emit the RMS during downtimes, which is bad.
-    tmin = np.maximum(
-        (p/2)/30e6,
-        0.98*1/lock_in_hz
-    )
-
-    # Get how long each step in the sequence will take in seconds
-    ts = seq["time_us"].values * 1e-6
-    # Calculate the endpoint of each step in time
-    boundaries = np.cumsum(ts)
-
-    # Round up the time to Tmin, otherwise we need a sampling rate higher than
-    # 30 MSa/s, resulting in a stretched signal
-    t = np.maximum(boundaries[-1], tmin)
-    # Generate p equidistant points in the time interval
-    samples = np.linspace(0, t, p, endpoint = False) # Generate sample points
-    # Calculate the final sampling rate, accounting for downsampling
-    samplerate = (p/2)/t
-    
-    # Display the temporal resolution. This might be moved to a return value.
-    timeres = t / (p/2)
-    #print(timeres)
-    if timeres > 1:
-        print(f"Temporal resolution: {timeres:.4g} s")
-    elif timeres > 1e-3:
-        print(f"Temporal resolution: {(timeres*1000):.4g} ms")
-    elif timeres > 1e-6:
-        print(f"Temporal resolution: {(timeres*1e6):.4g} us")
-    else:
-        print(f"Temporal resolution: {(timeres*1e9):.4g} ns")
-    
+   
     # Fill all channels with zeros
     Lp = np.zeros(p)
     Ln = np.zeros(p)
     I = np.zeros(p)
     Q = np.zeros(p)
+    
+    i = 0
+    for (index, row) in seq.iterrows():
+        count = 2 * round(row["length"])
+        newL = row["L"]
+        newI = row["I"]
+        newQ = row["Q"]
+        for j in range(count):
+            Lp[i] = newL
+            Ln[i] = -newL
+            I[i] = newI
+            Q[i] = newQ
+            i += 1
+            # TODO: bounds checking
+            
+    return  Lp, Ln, I, Q
+        
+# def seq_to_waveforms(seq, lock_in_hz):
+#     # TODO: Add docstring
+    
+#     # Set number of points. The ideal seems to be 2^15-2 = 32766
+#     # This will be downsampled to 16384 by the AWG, but sending that value to
+#     # begin with doesn't work.
+#     p =  0x7FFE
+    
+#     # Calculate the minimum amount of time it takes produce p points with
+#     # maximum sampling rate. The AWG will downsample the series by a factor of
+#     # 2, so we have to divide the numbe of points accordingly
+#     # Also stretch it out to fill out most of the lock-in period.
+#     # Without this, the AWG will emit the RMS during downtimes, which is bad.
+#     tmin = np.maximum(
+#         (p/2)/30e6,
+#         0.98*1/lock_in_hz
+#     )
 
-    # Iterate over all sample points
-    for (i, sample) in enumerate(samples):
-       # Figure out which step the sample point falls under. This is done by
-       # finding the first region where the endpoint is greater than the
-       # sample. For instance, if the sample is 30us and we have 2 20us steps,
-       # Step #2 is chosen because 20 is not greater than 30, but 40 is.
-       region = np.where(boundaries > sample)[0]
-       # If the region isn't empty (which can happen if the time was rounded up
-       # and the last interval is unaccounted for), check which channels should
-       # be on and set their value to 1.
-       if len(region) > 0:
-           if seq["L"].values[region[0]]:
-               Lp[i] = 1.0
-               Ln[i] = -1.0
-           if seq["I"].values[region[0]]:
-               I[i] = 1.0
-           if seq["Q"].values[region[0]]:
-               Q[i] = 1.0
-       else:
-           # We can break out of the for loop because all subsequent sample 
-           # points will be in the padding region, which is already 0 filled.
-           break
+#     # Get how long each step in the sequence will take in seconds
+#     ts = seq["time_us"].values * 1e-6
+#     # Calculate the endpoint of each step in time
+#     boundaries = np.cumsum(ts)
 
-    return Lp, Ln, I, Q, samplerate
+#     # Round up the time to Tmin, otherwise we need a sampling rate higher than
+#     # 30 MSa/s, resulting in a stretched signal
+#     t = np.maximum(boundaries[-1], tmin)
+#     # Generate p equidistant points in the time interval
+#     samples = np.linspace(0, t, p, endpoint = False) # Generate sample points
+#     # Calculate the final sampling rate, accounting for downsampling
+#     samplerate = (p/2)/t
+    
+#     # Display the temporal resolution. This might be moved to a return value.
+#     timeres = t / (p/2)
+#     #print(timeres)
+#     if timeres > 1:
+#         print(f"Temporal resolution: {timeres:.9g} s")
+#     elif timeres > 1e-3:
+#         print(f"Temporal resolution: {(timeres*1000):.9g} ms")
+#     elif timeres > 1e-6:
+#         print(f"Temporal resolution: {(timeres*1e6):.9g} us")
+#     else:
+#         print(f"Temporal resolution: {(timeres*1e9):.9g} ns")
+    
+#     # Fill all channels with zeros
+#     Lp = np.zeros(p)
+#     Ln = np.zeros(p)
+#     I = np.zeros(p)
+#     Q = np.zeros(p)
+
+#     # Iterate over all sample points
+#     for (i, sample) in enumerate(samples):
+#        # Figure out which step the sample point falls under. This is done by
+#        # finding the first region where the endpoint is greater than the
+#        # sample. For instance, if the sample is 30us and we have 2 20us steps,
+#        # Step #2 is chosen because 20 is not greater than 30, but 40 is.
+#        region = np.where(boundaries > sample)[0]
+#        # If the region isn't empty (which can happen if the time was rounded up
+#        # and the last interval is unaccounted for), check which channels should
+#        # be on and set their value to 1.
+#        if len(region) > 0:
+#            if seq["L"].values[region[0]]:
+#                Lp[i] = 1.0
+#                Ln[i] = -1.0
+#            if seq["I"].values[region[0]]:
+#                I[i] = 1.0
+#            if seq["Q"].values[region[0]]:
+#                Q[i] = 1.0
+#        else:
+#            # We can break out of the for loop because all subsequent sample 
+#            # points will be in the padding region, which is already 0 filled.
+#            break
+
+#     return Lp, Ln, I, Q, samplerate
 
 def vis_sequence_proportional(seq):
     """
