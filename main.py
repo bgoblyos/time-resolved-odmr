@@ -19,17 +19,21 @@ this program. If not, see https://www.gnu.org/licenses/.
 #%% Imports
 import Devices.AWG
 import Devices.LockIn
+import Devices.Sweeper
 
 import pyvisa
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import time
+import tqdm
 
 #%%
 awg1_addr = 'USB0::0xF4EC::0x1103::SDG1XDDC801291::INSTR' 
 awg2_addr = 'USB0::0xF4EC::0x1103::SDG1XDDC801272::INSTR'
 lock_addr = 'GPIB0::8::INSTR'
+sweeper_addr = 'GPIB0::11::INSTR'
+pico_addr = 'ASRL3::INSTR'
 #%% Measure noise
 rm = pyvisa.ResourceManager()
 awg1 = Devices.AWG.SDG1062X(rm, 'USB0::0xF4EC::0x1103::SDG1XDDC801291::INSTR', internal_oscillator=True)
@@ -84,8 +88,8 @@ def T1(tau, ti, tr, settle = 10, integrate = 10, srate = 1e6):
     awg1 = Devices.AWG.SDG1062X(rm, awg1_addr, internal_oscillator=True)
     lock = Devices.LockIn.SR830M(rm, lock_addr)
     
-    awg1.output(1, False)
-    awg1.output(2, False)
+    #awg1.output(1, False)
+    #awg1.output(2, False)
     
     fl = lock.snap()["Ref"]
     delay = srate/fl/2 - ti
@@ -113,9 +117,11 @@ def T1(tau, ti, tr, settle = 10, integrate = 10, srate = 1e6):
     awg1.burst_ext(1)
     awg1.burst_ext(2)
     awg1.device.query("*OPC?")
-    awg1.output(1, True)
-    awg1.output(2, True)
+    #awg1.output(1, True)
+    #awg1.output(2, True)
     awg1.device.query("*OPC?")
+    
+    #TODO: Set display 1 to R programmatically
     
     # Clear buffer and set up lock-in data collection
     lock.device.write("TSTR")
@@ -144,9 +150,9 @@ def T1(tau, ti, tr, settle = 10, integrate = 10, srate = 1e6):
         "Rs": data,
         "Rmean": mean,
         "Rstd": std,
-        "Tinit": ti/srate,
-        "Tread": tr/srate,
-        "Tau": tau/srate,
+        "Tinit": round(ti)/srate,
+        "Tread": round(tr)/srate,
+        "Tau": round(tau)/srate,
         "Theta": resp["Theta"],
         "X": resp["X"],
         "Y": resp["Y"],
@@ -157,16 +163,268 @@ def T1(tau, ti, tr, settle = 10, integrate = 10, srate = 1e6):
 def T1iterated(taus, tis, trs, savedir = None, **kwargs):
 
     results = []
+    pbar = tqdm.tqdm(total = len(taus)*len(tis)*len(trs))
     
     for tau in taus:
         for ti in tis:
             for tr in trs:
                 results.append(T1(tau, ti, tr, **kwargs))
+                pbar.update(1)
                 
     data = pd.DataFrame.from_dict(results)
-
+    pbar.close()
+    
     if savedir is not None:
         timestamp = round(time.time())
         data.to_json(f"{savedir}/{timestamp}.json")
     
     return data
+#%%
+result = T1iterated(
+    np.geomspace(10,6000,20),
+    [5, 10, 15, 20, 25, 30, 35, 40, 45, 50],
+    [1,2,3,4,5,6,7,8,9,10],
+    savedir = "E:/T1",
+    settle = 10,
+    integrate = 60,
+)
+plt.errorbar(result.Tau, result.Rmean, yerr = result.Rstd)
+plt.xscale("log")
+#%%
+plt.errorbar(result.Tau, result.Rmean, yerr = result.Rstd)
+#plt.ylim(1.7e-5, 1.9e-5)
+plt.xscale("log")
+plt.show()
+#%%
+rm = pyvisa.ResourceManager()
+pico = rm.open_resource(pico_addr)
+
+def wrap_query(str):
+    print(f"Query: {repr(str)}")
+    resp = pico.query(str)
+    print(f"Response: {repr(resp)}")
+    return resp
+
+for mw in [20,30,40,50,60,70,80,90,100]:
+    # Lock-in reference signal
+    halft = 1000000
+    wait1 = 13000
+    #mw = 20
+    seq = f"{wait1},1,{mw},3,{halft-mw-wait1},1,{halft},0"
+    wrap_query(f"PULSE 0 {1 << 32 - 1} {seq}")
+    time.sleep(1)
+
+    
+# awg1 = Devices.AWG.SDG1062X(rm, awg1_addr, internal_oscillator=True)
+# lock = Devices.LockIn.SR830M(rm, lock_addr)
+
+# #awg1.output(1, False)
+# #awg1.output(2, False)
+
+# srate = 8.2e6
+# fl = lock.snap()["Ref"]
+# ti = 100 # 10 us
+# delay = srate/fl/2 - ti
+
+# sequence = pd.DataFrame(
+#     columns = ["length", "L", "I", "Q"],
+#     data = [
+#         [ti,    True, False, False],
+#         [delay, False, False, False],
+#         [ti,    True, False, False],
+#     ]
+# )
+
+# Lp, Ln, I, Q = Devices.AWG.seq_to_waveforms(sequence)
+
+
+# awg1.set_waveform_exact(
+#      1, Lp, samplerate=srate, amp = 20, name = "Lp")
+# awg1.set_waveform_exact(
+#      2, Ln, samplerate=srate, amp = 20, name = "Ln")
+ 
+# # Set up burst and enable AWG outputs
+# awg1.burst_ext(1)
+# awg1.burst_ext(2)
+# awg1.device.query("*OPC?")
+# #awg1.output(1, True)
+# #awg1.output(2, True)
+# awg1.device.query("*OPC?")
+
+
+rm.close()
+#%% Rabi definitions
+
+
+def rabi(mw, mw_freq = None, settle = 1, integrate = 1, comment = "None"):
+    rm = pyvisa.ResourceManager()
+    pico = rm.open_resource(pico_addr)
+    lock = Devices.LockIn.SR830M(rm, lock_addr)
+    sweeper = Devices.Sweeper.HP83752A(rm, sweeper_addr)
+    
+    if mw_freq is not None:
+        sweeper.setCW(mw_freq)
+    
+    # Lock-in reference signal
+    #halft = 1000000
+    #wait1 = 50
+    #mw = 20
+    #seq = f"{halft-mw-wait1},1,{mw},3,{wait1},1,{halft},0"
+    
+    laser_on = 90000
+    laser_off = 10000
+    delay = laser_on + laser_off
+    halft = 1000000
+    mw_seq = f"{laser_on},1,{laser_off - mw},1,{mw},3,"
+    #seq = f"{delay},1,{laser_cycle - mw},1,{mw},1,{halft - 4*laser_cycle},1,{halft},0"
+    seq = f"{delay},1,{9 * mw_seq}{halft},0"
+    
+    pico.query(f"PULSE 0 {1 << 32 - 1} {seq}")
+    
+    # Clear buffer and set up lock-in data collection
+    lock.device.write("TSTR")
+    lock.device.write("SRAT 7") # 8 Hz
+    lock.device.write("SEND 0")
+    lock.device.write("PAUS;REST")
+    # Wait for system to settle and trigger the data collection
+    time.sleep(settle)
+    lock.device.write("TRIG")
+    
+    # Wait for data to be collected
+    time.sleep(integrate)
+    
+    # Stop data collection
+    lock.device.write("PAUS")
+    
+    # Retrieve data
+    Rs = lock.readBuffer(1, 0, integrate * 8)
+    Thetas = lock.readBuffer(2, 0, integrate * 8)
+    mean = np.mean(Rs)
+    std = np.std(Rs)
+    resp = lock.snap()
+    
+    mw_freq = sweeper.getCW()
+    mw_power = sweeper.readPowerLevel()
+    
+    rm.close()
+    
+    return {
+        "Rs": Rs,
+        "Rmean": mean,
+        "Rstd": std,
+        "mw_ns": mw,
+        "Thetas": Thetas,
+        "settle_s": settle,
+        "integrate_s": integrate,
+        "seq": seq,
+        "halfperiod_ns": halft,
+        "padding_ns": wait1,
+        "Fref_Hz": resp["Ref"],
+        "comment": comment,
+        "mw_freq_Hz": mw_freq,
+        "mw_power_dBm": mw_power,
+    }
+
+def rabi_iterated(mws, freqs = [None], savedir = None, **kwargs):
+
+    results = []
+    pbar = tqdm.tqdm(total = len(mws) * len(freqs))
+    
+    for freq in freqs:
+        for mw in mws:
+            results.append(rabi(mw, mw_freq = freq, **kwargs))
+            pbar.update(1)
+                
+    data = pd.DataFrame.from_dict(results)
+    pbar.close()
+    
+    if savedir is not None:
+        timestamp = round(time.time())
+        data.to_json(f"{savedir}/{timestamp}.json")
+    
+    return data
+    
+#%%
+result = rabi_iterated(
+    np.arange(800, 2000, 1000),
+    [2.4706875],
+    savedir = "E:/Rabi/",
+    settle = 2,
+    integrate = 8,
+    comment = "Split resonance",
+    #mw_freq = 2.574125
+)
+plt.errorbar(result.mw_ns, result.Rmean, yerr = result.Rstd)
+result
+
+#%% CW
+def CW(start, stop):
+    rm = pyvisa.ResourceManager()
+    pico = rm.open_resource(pico_addr)
+    lock = Devices.LockIn.SR830M(rm, lock_addr)
+    sweeper = Devices.Sweeper.HP83752A(rm, sweeper_addr)
+    
+    sweep_time = 100
+    
+    # Lock-in reference signal
+    halft = 1000000
+    #mw = 14000
+    seq = f"{halft},3,{halft},0"
+    pico.query(f"PULSE 0 {1 << 32 - 1} {seq}")
+    
+    # Clear buffer and set up lock-in data collection
+    lock.device.write("TSTR")
+    lock.device.write("SRAT 7") # 8 Hz
+    lock.device.write("SEND 0")
+    lock.device.write("PAUS;REST")
+    
+    # Set up sweeper
+    sweeper.setupSweep(start, stop, sweep_time)
+    
+    # Wait for system to settle and trigger the sweep
+    time.sleep(1)
+    sweeper.startSweep()
+    
+    # Wait for data to be collected
+    time.sleep(sweep_time + 1)
+    
+    # Stop data collection
+    lock.device.write("PAUS")
+    
+    # Retrieve data
+    Rs = list(map(float, lock.device.query(f"TRCA?1,0,{sweep_time * 8}").split(',')[:-1]))
+    thetas = list(map(float, lock.device.query(f"TRCA?2,0,{sweep_time * 8}").split(',')[:-1]))
+    freqs = np.linspace(start , stop, len(Rs), endpoint=False)
+    rm.close()
+    
+    return freqs, Rs, thetas
+
+#%%
+freq, Rs, thetas = CW(2.0, 3.5)
+plt.plot(freq, Rs)
+plt.xlabel("Microwave frequency (GHz)")
+plt.ylabel("Lock-in signal (V)")
+
+df = pd.DataFrame(columns=["freqs", "R", "theta"], data = np.array([freq, Rs, thetas]).T)
+df.to_json("E:/CW/Rabi/pulsed_laser_magnet_overview.json")
+#%%
+plt.scatter(old.mw_ns, old.Rmean)
+plt.scatter(result.mw_ns, result.Rmean)
+#plt.xlim(0, 3000)
+plt.show()
+
+#%%
+rm = pyvisa.ResourceManager()
+pico = rm.open_resource(pico_addr)
+
+laser_on = 50000
+laser_off = 50000
+delay = 2*laser_on + laser_off
+halft = 1000000
+mw = 30000
+mw_seq = f"{laser_off - mw},1,{mw},3,{laser_on},1,"
+#seq = f"{delay},1,{laser_cycle - mw},1,{mw},1,{halft - 4*laser_cycle},1,{halft},0"
+seq = f"{delay},1,{9 * mw_seq}{halft},0"
+pico.query(f"PULSE 0 {1 << 32 - 1} {seq}")
+
+rm.close()

@@ -14,6 +14,7 @@ this program. If not, see https://www.gnu.org/licenses/.
 """
 
 import pandas as pd
+import struct
 
 class SR830M():
     def __init__(self, rm, address):
@@ -112,4 +113,50 @@ class SR830M():
             data = self.device.query("SNAP? 1,2,3,4,9").split(',')
 
         return {labels[i]: float(data[i]) for i in range(len(labels))}
+    
+    def readBinNum(self):
+        res = self.device.query('SPTS?')
+        return int(res)
+    
+    def queryBinary(self, param):
+        # Increse timeout, otherwise the transfer takes too long
+        oldTimeout = self.device.timeout
+        self.device.timeout = 60000 # 1 minute
+    
+        self.device.write(param)
+        response = self.device.read_raw()
+    
+        # Reset the timeout
+        self.device.timeout = oldTimeout
+    
+        return response
+
+    def queryBinaryFloat(self, param):
+        response = self.queryBinary(param)
+        entries = len(response) // 4
+        data = struct.unpack(f"{entries}f", response)
+        return list(data)
+    
+    def readBuffer(self, buffer, firstPoint = 0, numPoints = 0):
+       bufferSize = self.readBinNum()
+
+       if bufferSize == 0:
+           #logging.warning("The lock-in buffer is empty, nothing could be retrieved.")
+           return []
+
+       if numPoints <= 0:
+           numPoints = bufferSize - firstPoint
+
+       if (firstPoint >= bufferSize) or (firstPoint < 0):
+           #logging.warning(f"Starting index is out of bounds (requested index {firstPoint} from {bufferSize} elements)")
+           return []
+
+       if (firstPoint + numPoints) > bufferSize:
+           #logging.info("Requested too many points, clamping it.")
+           numPoints = bufferSize - firstPoint
+
+       queryStr = f"TRCB ? {buffer}, {firstPoint}, {numPoints}"
+       return self.queryBinaryFloat(queryStr)
+
+
 
