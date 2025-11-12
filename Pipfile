@@ -9,6 +9,7 @@ numpy = "*"
 scipy = "*"
 pyvisa = "*"
 pandas = "*"
+pyserial = "*"
 
 [dev-packages]
 spyder = "*"
