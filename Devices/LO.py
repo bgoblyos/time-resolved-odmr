@@ -48,8 +48,7 @@ class KuhnePLL():
         
         for (freq, prefix) in zip([ghz, mhz, khz, hz], ["G", "M", "k", "H"]):
             cmd = f"{freq}{prefix}F1"
-            print(cmd)
-            nchar, resp = self.sendCommand(cmd, timeout = 0.115, capture_output = True)
+            nchar, resp = self.sendCommand(cmd, timeout = 0.015, capture_output = True)
             if nchar == -1 or resp != "A":
                 print(resp)
                 return 1
