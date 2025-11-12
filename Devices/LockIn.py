@@ -158,5 +158,6 @@ class SR830M():
        queryStr = f"TRCB ? {buffer}, {firstPoint}, {numPoints}"
        return self.queryBinaryFloat(queryStr)
 
-
+    # TODO: Implement function which takes in a desired sample rate,
+    # finds the closest achievable value, sets it and returns the result.
 

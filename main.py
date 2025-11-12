@@ -273,17 +273,25 @@ def rabi(mw, mw_freq = None, settle = 1, integrate = 1, comment = "None"):
     
     laser_on = 90000
     laser_off = 10000
+    padding = 500
     delay = laser_on + laser_off
     halft = 1000000
-    mw_seq = f"{laser_on},1,{laser_off - mw},1,{mw},3,"
-    #seq = f"{delay},1,{laser_cycle - mw},1,{mw},1,{halft - 4*laser_cycle},1,{halft},0"
-    seq = f"{delay},1,{9 * mw_seq}{halft},0"
+    if mw + padding + 40 > laser_off:
+        return {"Errors" : ["Microwave cycle too long"]}
+    
+    if mw >= 20:
+        mw_seq = f"{laser_on},1,{laser_off - mw - padding},1,{mw},3,{padding},1,"
+        seq = f"{delay},1,{9 * mw_seq}{halft},0"
+    else:
+        seq = f"{halft},1,{halft},0"    
     
     pico.query(f"PULSE 0 {1 << 32 - 1} {seq}")
     
     # Clear buffer and set up lock-in data collection
     lock.device.write("TSTR")
-    lock.device.write("SRAT 7") # 8 Hz
+    #lock.device.write("SRAT 7") # 8 Hz
+    # TODO: Implement this by sending the desired sample rate
+    lock.device.write("SRAT 9") # 32 Hz
     lock.device.write("SEND 0")
     lock.device.write("PAUS;REST")
     # Wait for system to settle and trigger the data collection
@@ -291,20 +299,22 @@ def rabi(mw, mw_freq = None, settle = 1, integrate = 1, comment = "None"):
     lock.device.write("TRIG")
     
     # Wait for data to be collected
-    time.sleep(integrate)
+    time.sleep(integrate + 0.125)
     
     # Stop data collection
     lock.device.write("PAUS")
     
     # Retrieve data
-    Rs = lock.readBuffer(1, 0, integrate * 8)
-    Thetas = lock.readBuffer(2, 0, integrate * 8)
+    Rs = lock.readBuffer(1, 0, integrate * 32)
+    Thetas = lock.readBuffer(2, 0, integrate * 32)
     mean = np.mean(Rs)
     std = np.std(Rs)
     resp = lock.snap()
     
     mw_freq = sweeper.getCW()
     mw_power = sweeper.readPowerLevel()
+    
+    #TODO: Read errors from sweeper
     
     rm.close()
     
@@ -318,11 +328,12 @@ def rabi(mw, mw_freq = None, settle = 1, integrate = 1, comment = "None"):
         "integrate_s": integrate,
         "seq": seq,
         "halfperiod_ns": halft,
-        "padding_ns": wait1,
+        "padding_ns": padding,
         "Fref_Hz": resp["Ref"],
         "comment": comment,
         "mw_freq_Hz": mw_freq,
         "mw_power_dBm": mw_power,
+        "errors": [],
     }
 
 def rabi_iterated(mws, freqs = [None], savedir = None, **kwargs):
@@ -345,14 +356,17 @@ def rabi_iterated(mws, freqs = [None], savedir = None, **kwargs):
     return data
     
 #%%
+mws = np.arange(10, 6000, 10)
+#np.random.shuffle(mws)
+mws = np.flip(mws)
+
 result = rabi_iterated(
-    np.arange(800, 2000, 1000),
-    [2.4706875],
+    mws,
+    [2.6051], #np.linspace(2.6051-0.25, 2.6051 + 0.25, 3), #
     savedir = "E:/Rabi/",
-    settle = 2,
-    integrate = 8,
-    comment = "Split resonance",
-    #mw_freq = 2.574125
+    settle = 0.5,
+    integrate = 1,
+    comment = "Split resonance, 20 dB attenuator before amp",
 )
 plt.errorbar(result.mw_ns, result.Rmean, yerr = result.Rstd)
 result
@@ -400,13 +414,14 @@ def CW(start, stop):
     return freqs, Rs, thetas
 
 #%%
-freq, Rs, thetas = CW(2.0, 3.5)
+freq, Rs, thetas = CW(2.5, 2.7)
 plt.plot(freq, Rs)
 plt.xlabel("Microwave frequency (GHz)")
 plt.ylabel("Lock-in signal (V)")
 
 df = pd.DataFrame(columns=["freqs", "R", "theta"], data = np.array([freq, Rs, thetas]).T)
-df.to_json("E:/CW/Rabi/pulsed_laser_magnet_overview.json")
+#df.to_json("E:/CW/Rabi/pulsed_laser_magnet_overview.json")
+plt.plot(df.freqs, df.R)
 #%%
 plt.scatter(old.mw_ns, old.Rmean)
 plt.scatter(result.mw_ns, result.Rmean)
@@ -414,17 +429,18 @@ plt.scatter(result.mw_ns, result.Rmean)
 plt.show()
 
 #%%
-rm = pyvisa.ResourceManager()
+rm =  pyvisa.ResourceManager()
 pico = rm.open_resource(pico_addr)
 
-laser_on = 50000
-laser_off = 50000
-delay = 2*laser_on + laser_off
-halft = 1000000
-mw = 30000
-mw_seq = f"{laser_off - mw},1,{mw},3,{laser_on},1,"
-#seq = f"{delay},1,{laser_cycle - mw},1,{mw},1,{halft - 4*laser_cycle},1,{halft},0"
-seq = f"{delay},1,{9 * mw_seq}{halft},0"
+seq = "1000000,3,1000000,3"
 pico.query(f"PULSE 0 {1 << 32 - 1} {seq}")
 
 rm.close()
+#%% Sweeper diagnostics
+rm = pyvisa.ResourceManager()
+
+sweeper = Devices.Sweeper.HP83752A(rm, sweeper_addr)
+
+print(sweeper.device.query("SYST:ERR?"))
+
+rm.close() 
