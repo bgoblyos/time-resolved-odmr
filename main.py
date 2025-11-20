@@ -443,4 +443,25 @@ sweeper = Devices.Sweeper.HP83752A(rm, sweeper_addr)
 
 print(sweeper.device.query("SYST:ERR?"))
 
-rm.close() 
+rm.close()
+
+#%%
+
+seq = pd.DataFrame(
+    columns = ["time", "ch1", "ch2", "ch3", "ch4", "ch5"],
+    data = [
+        [100, 1, 1, 1, 1, 1],
+        [100, 0, 0, 0, 0, 0]
+    ]
+)
+
+#%%
+from Devices.PicoPulse import PicoPulse
+
+rm = pyvisa.ResourceManager()
+pico = PicoPulse(rm, "ASRL/dev/ttyACM0::INSTR")
+
+res = pico.sendSequence(seq, cycle = True)
+
+rm.close()
+res

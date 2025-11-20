@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "226b4ae82bdcd6eca98eb3a141b11bb86730725f4a8319a600d8c4d9e5b8f43e"
+            "sha256": "4202bbbe0a4b986914de2d949f2b2e4b84aac61acfd2d68a5112a5377ffcbbd0"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -625,6 +625,15 @@
             "markers": "python_version >= '3.10'",
             "version": "==1.15.0"
         },
+        "pyvisa-py": {
+            "hashes": [
+                "sha256:31208a2933c1793b4e829ba5f07d265b83f280668df440ee7ee6ac505dea4ee9",
+                "sha256:db53d3219d971d16b8f7c764a93e08475875063635b9ad8ea3c988439833ccdd"
+            ],
+            "index": "pypi",
+            "markers": "python_version >= '3.10'",
+            "version": "==0.8.1"
+        },
         "scipy": {
             "hashes": [
                 "sha256:0851f6a1e537fe9399f35986897e395a1aa61c574b178c0d456be5b1a0f5ca1f",
@@ -695,13 +704,22 @@
             "markers": "python_version >= '2.7' and python_version not in '3.0, 3.1, 3.2'",
             "version": "==1.17.0"
         },
+        "tqdm": {
+            "hashes": [
+                "sha256:26445eca388f82e72884e0d580d5464cd801a3ea01e63e5601bdff9ba6a48de2",
+                "sha256:f8aef9c52c08c13a65f30ea34f4e5aac3fd1a34959879d7e59e63027286627f2"
+            ],
+            "index": "pypi",
+            "markers": "python_version >= '3.7'",
+            "version": "==4.67.1"
+        },
         "typing-extensions": {
             "hashes": [
-                "sha256:38b39f4aeeab64884ce9f74c94263ef78f3c22467c8724005483154c26648d36",
-                "sha256:d1e1e3b58374dc93031d6eda2420a48ea44a36c2b4766a4fdeb3710755731d76"
+                "sha256:0cea48d173cc12fa28ecabc3b837ea3cf6f38c6d1136f85cbaaf598984861466",
+                "sha256:f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548"
             ],
             "markers": "python_version >= '3.9'",
-            "version": "==4.14.1"
+            "version": "==4.15.0"
         },
         "tzdata": {
             "hashes": [

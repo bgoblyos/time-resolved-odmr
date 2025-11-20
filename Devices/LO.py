@@ -1,4 +1,4 @@
-# Copyright (c) 2025 Bence Göblyös
+# Copyright (C) 2025 Bence Göblyös
 
 import serial      # Serial communication
 import time        # Timeout handling

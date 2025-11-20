@@ -10,6 +10,8 @@ scipy = "*"
 pyvisa = "*"
 pandas = "*"
 pyserial = "*"
+tqdm = "*"
+pyvisa-py = "*"
 
 [dev-packages]
 spyder = "*"
