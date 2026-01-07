@@ -20,6 +20,7 @@ this program. If not, see https://www.gnu.org/licenses/.
 import Devices.AWG
 import Devices.LockIn
 import Devices.Sweeper
+from Devices.PicoPulse import PicoPulse
 
 import pyvisa
 import matplotlib.pyplot as plt
@@ -82,44 +83,25 @@ for delay in delays:
     Xns.append(res2["DISP1"])
     Yns.append(res2["DISP2"])
 #%% T1
-def T1(tau, ti, tr, settle = 10, integrate = 10, srate = 1e6):
+def T1(tau, ti, tr, halft = 1e7, settle = 10, integrate = 10, comment = ""):
     
     rm = pyvisa.ResourceManager()
-    awg1 = Devices.AWG.SDG1062X(rm, awg1_addr, internal_oscillator=True)
+    pico = PicoPulse(rm, pico_addr)
     lock = Devices.LockIn.SR830M(rm, lock_addr)
-    
-    #awg1.output(1, False)
-    #awg1.output(2, False)
-    
-    fl = lock.snap()["Ref"]
-    delay = srate/fl/2 - ti
-    
+        
     sequence = pd.DataFrame(
-        columns = ["length", "L", "I", "Q"],
+        columns = ["time", "ch1", "ch2", "ch3", "ch4"],
         data = [
-            [ti,    True,  False, False],
-            [delay, False, False, False],
-            [ti,    True,  False, False],
-            [tau,   False, False, False],
-            [tr,    True,  False, False],
+            [ti,              1, 1, 0, 0],
+            [halft-ti,        1, 0, 0, 0],
+            [ti,              0, 1, 0, 0],
+            [tau,             0, 0, 0, 0],
+            [tr,              0, 1, 0, 0],
+            [halft-ti-tr-tau, 0, 0, 0, 0],
         ]
     )
-    
-    Lp, Ln, I, Q = Devices.AWG.seq_to_waveforms(sequence)
-    
-    
-    awg1.set_waveform_exact(
-         1, Lp, samplerate=srate, amp = 20, name = "Lp")
-    awg1.set_waveform_exact(
-         2, Ln, samplerate=srate, amp = 20, name = "Ln")
      
-    # Set up burst and enable AWG outputs
-    awg1.burst_ext(1)
-    awg1.burst_ext(2)
-    awg1.device.query("*OPC?")
-    #awg1.output(1, True)
-    #awg1.output(2, True)
-    awg1.device.query("*OPC?")
+    pico.sendSequence(sequence, cycle = False)
     
     #TODO: Set display 1 to R programmatically
     
@@ -150,13 +132,14 @@ def T1(tau, ti, tr, settle = 10, integrate = 10, srate = 1e6):
         "Rs": data,
         "Rmean": mean,
         "Rstd": std,
-        "Tinit": round(ti)/srate,
-        "Tread": round(tr)/srate,
-        "Tau": round(tau)/srate,
+        "Tinit": ti,
+        "Tread": tr,
+        "Tau": tau,
         "Theta": resp["Theta"],
         "X": resp["X"],
         "Y": resp["Y"],
-        "Fref": fl
+        "Fref": 1e9/halft,
+        "Comment": comment,
     }
     
 
@@ -181,12 +164,13 @@ def T1iterated(taus, tis, trs, savedir = None, **kwargs):
     return data
 #%%
 result = T1iterated(
-    np.geomspace(10,6000,20),
-    [5, 10, 15, 20, 25, 30, 35, 40, 45, 50],
-    [1,2,3,4,5,6,7,8,9,10],
+    np.geomspace(1e3,6e6,20),
+    [50e3], #[5, 10, 15, 20, 25, 30, 35, 40, 45, 50],
+    [10e3], #[1,2,3,4,5,6,7,8,9,10],
     savedir = "E:/T1",
-    settle = 10,
-    integrate = 60,
+    settle = 5,
+    integrate = 25,
+    comment = "40 dB detector gain, high reserve"
 )
 plt.errorbar(result.Tau, result.Rmean, yerr = result.Rstd)
 plt.xscale("log")
@@ -374,17 +358,22 @@ result
 #%% CW
 def CW(start, stop):
     rm = pyvisa.ResourceManager()
-    pico = rm.open_resource(pico_addr)
+    pico = PicoPulse(rm, pico_addr)
     lock = Devices.LockIn.SR830M(rm, lock_addr)
     sweeper = Devices.Sweeper.HP83752A(rm, sweeper_addr)
     
     sweep_time = 100
     
-    # Lock-in reference signal
-    halft = 1000000
-    #mw = 14000
-    seq = f"{halft},3,{halft},0"
-    pico.query(f"PULSE 0 {1 << 32 - 1} {seq}")
+
+    CW_seq = pd.DataFrame(
+        columns = ["time", "ch1", "ch2", "ch3", "ch4"],
+        data = [
+            [1e6, 1, 1, 1, 1],
+            [1e6, 0, 1, 0, 0]
+        ]
+    )
+
+    pico.sendSequence(CW_seq, cycle = False)
     
     # Clear buffer and set up lock-in data collection
     lock.device.write("TSTR")
@@ -414,7 +403,7 @@ def CW(start, stop):
     return freqs, Rs, thetas
 
 #%%
-freq, Rs, thetas = CW(2.5, 2.7)
+freq, Rs, thetas = CW(2.72, 2.9)
 plt.plot(freq, Rs)
 plt.xlabel("Microwave frequency (GHz)")
 plt.ylabel("Lock-in signal (V)")
@@ -423,10 +412,8 @@ df = pd.DataFrame(columns=["freqs", "R", "theta"], data = np.array([freq, Rs, th
 #df.to_json("E:/CW/Rabi/pulsed_laser_magnet_overview.json")
 plt.plot(df.freqs, df.R)
 #%%
-plt.scatter(old.mw_ns, old.Rmean)
-plt.scatter(result.mw_ns, result.Rmean)
-#plt.xlim(0, 3000)
-plt.show()
+plt.scatter(df.freqs, df.R)
+plt.xlim(2.72, 2.9)
 
 #%%
 rm =  pyvisa.ResourceManager()
@@ -447,21 +434,189 @@ rm.close()
 
 #%%
 
-seq = pd.DataFrame(
-    columns = ["time", "ch1", "ch2", "ch3", "ch4", "ch5"],
+CW_seq = pd.DataFrame(
+    columns = ["time", "ch1", "ch2", "ch3", "ch4"],
     data = [
-        [100, 1, 1, 1, 1, 1],
-        [100, 0, 0, 0, 0, 0]
+        [1e6, 1, 1, 1, 1],
+        [1e6, 0, 1, 0, 0]
+    ]
+)
+
+
+idle_seq = pd.DataFrame(
+    columns = ["time", "ch1", "ch2", "ch3", "ch4"],
+    data = [
+        [1e6, 1, 0, 0, 0],
+        [1e6, 0, 0, 0, 0]
+    ]
+)
+
+laser_seq = pd.DataFrame(
+    columns = ["time", "ch1", "ch2", "ch3", "ch4"],
+    data = [
+        [1e6, 1, 1, 0, 0],
+        [1e6, 0, 1, 0, 0]
+    ]
+)
+
+transient_seq = pd.DataFrame(
+    columns = ["time", "ch1", "ch2", "ch3", "ch4"],
+    data = [
+        [500, 0, 1, 0, 0],
+        [500, 0, 0, 0, 0]
+    ]
+)
+
+laser_noise_seq = pd.DataFrame(
+    columns = ["time", "ch1", "ch2", "ch3", "ch4"],
+    data = [
+        [1e6, 1, 0, 0, 0],
+        [1e6, 1, 1, 0, 0],
+        [1e6, 0, 0, 0, 0],
+        [1e6, 0, 1, 0, 0],
+    ]
+)
+
+pl_lock_seq = pd.DataFrame(
+    columns = ["time", "ch1", "ch2", "ch3", "ch4"],
+    data = [
+        [1e6, 0, 0, 0, 0],
+        [1e6, 1, 1, 0, 0],
     ]
 )
 
 #%%
-from Devices.PicoPulse import PicoPulse
-
 rm = pyvisa.ResourceManager()
-pico = PicoPulse(rm, "ASRL/dev/ttyACM0::INSTR")
+pico = PicoPulse(rm, pico_addr)
 
-res = pico.sendSequence(seq, cycle = True)
+res = pico.sendSequence(laser_seq, cycle = False)
 
 rm.close()
 res
+
+# %% CW, no sweep
+
+def CWalt(f, settle = 10, integrate = 10, comment = ""):
+    
+    rm = pyvisa.ResourceManager()
+    # pico = PicoPulse(rm, pico_addr)
+    lock = Devices.LockIn.SR830M(rm, lock_addr)
+    sweeper = Devices.Sweeper.HP83752A(rm, sweeper_addr)
+        
+    sweeper.setCW(f)
+    sweeper.powerOn()
+    
+    # CW_seq = pd.DataFrame(
+    #     columns = ["time", "ch1", "ch2", "ch3", "ch4"],
+    #     data = [
+    #         [1e6, 1, 1, 1, 1],
+    #         [1e6, 0, 1, 0, 0]
+    #     ]
+    # )
+
+    # pico.sendSequence(CW_seq, cycle = False)
+    
+    #TODO: Set display 1 to R programmatically
+    
+    # Clear buffer and set up lock-in data collection
+    lock.device.write("TSTR")
+    lock.device.write("SRAT 9") # 32 Hz
+    lock.device.write("SEND 0")
+    lock.device.write("PAUS;REST")
+    # Wait for system to settle and trigger the data collection
+    time.sleep(settle)
+    lock.device.write("TRIG")
+    
+    # Wait for data to be collected
+    time.sleep(integrate)
+    
+    # Stop data collection
+    lock.device.write("PAUS")
+    
+    # Retrieve data
+    data = lock.readBuffer(1, 0, integrate * 32)
+    mean = np.mean(data)
+    std = np.std(data)
+    resp = lock.snap()
+    
+    sweeper.powerOff()
+    
+    rm.close()
+    
+    return {
+        "Rs": data,
+        "Rmean": mean,
+        "Rstd": std,
+        "f": f,
+        "Theta": resp["Theta"],
+        "X": resp["X"],
+        "Y": resp["Y"],
+        "Comment": comment,
+    }
+    
+
+def picoIdle():
+    idle_seq = pd.DataFrame(
+        columns = ["time", "ch1", "ch2", "ch3", "ch4"],
+        data = [
+            [1e6, 1, 0, 0, 0],
+            [1e6, 0, 0, 0, 0]
+        ]
+    )
+    
+    rm = pyvisa.ResourceManager()
+    pico = PicoPulse(rm, pico_addr)
+    pico.sendSequence(idle_seq, cycle = False)
+    rm.close()
+
+
+def picoCW():
+    CW_seq = pd.DataFrame(
+        columns = ["time", "ch1", "ch2", "ch3", "ch4"],
+        data = [
+            [1e6, 1, 1, 1, 1],
+            [1e6, 0, 1, 0, 0]
+            ]
+        )
+    
+    rm = pyvisa.ResourceManager()
+    pico = PicoPulse(rm, pico_addr)
+    pico.sendSequence(CW_seq, cycle = False)
+    rm.close()
+
+def CWiterated(fs, savedir = None, **kwargs):
+
+    picoCW()
+
+    results = []
+    pbar = tqdm.tqdm(total = len(fs))
+    
+    for f in fs:
+        results.append(CWalt(f, **kwargs))
+        pbar.update(1)
+                
+    data = pd.DataFrame.from_dict(results)
+    pbar.close()
+    
+    picoIdle()
+    
+    if savedir is not None:
+        timestamp = round(time.time())
+        data.to_json(f"{savedir}/{timestamp}.json")
+    
+    return data
+
+#%%
+fs = np.linspace(2.675, 3.1, 36000)
+#fs = np.linspace(2.725, 2.750, 100)
+np.random.shuffle(fs)
+
+result = CWiterated(
+    fs,
+    savedir = "E:/CW/Hyperfine/",
+    settle = 0.25,
+    integrate = 0.75,
+    comment = "15 mW laser, -15 dBm sweeper",
+)
+plt.errorbar(result.f, result.Rmean, yerr = result.Rstd, fmt = ".")
+result
