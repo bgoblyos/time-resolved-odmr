@@ -10,17 +10,27 @@ Kuhne MKU LO 8-13 PLL
 class KuhnePLL():
     def __init__(self, port, timeout = 1.0):
         self.device = None
+        self.port = port
+        self.connect_timeout = timeout
+        self.connect()
+        
+    def __del__(self):
+        self.device.close()
+        
+    def connect(self):
         try:
             self.device = serial.Serial(
-                port = port,
+                port = self.port,
                 baudrate = 115200,
                 bytesize = serial.EIGHTBITS,
                 parity = serial.PARITY_NONE,
                 stopbits = serial.STOPBITS_ONE,
-                timeout = timeout,
+                timeout = self.connect_timeout,
             )
+            return True
         except serial.SerialException as err:
             print(f"Failed to connect to oscillator with reason: {err}")
+            return False
 
     def sendCommand(self, cmd, timeout = 1.0, capture_output = True):
         try:
@@ -39,7 +49,8 @@ class KuhnePLL():
             print(f"Sending command to oscillator failed with reason: {err}")
             return -1, err
 
-    def setHZ(self, val):
+    def setHz(self, val):
+        # TODO: Soft fail if device is None
         hz = str(round((np.floor(val) % 1000))).zfill(3)
         khz = str(round(np.floor(val*1e-3) % 1000)).zfill(3)
         mhz = str(round(np.floor(val*1e-6) % 1000)).zfill(3)
@@ -51,7 +62,15 @@ class KuhnePLL():
             nchar, resp = self.sendCommand(cmd, timeout = 0.015, capture_output = True)
             if nchar == -1 or resp != "A":
                 print(resp)
-                return 1
+                return False
             
-        return 0
-
+        return True
+    
+    def setkHz(self, val):
+        return self.setHz(val*1e3)
+    
+    def setMHz(self, val):
+        return self.setHz(val*1e6)
+    
+    def setGHz(self, val):
+        return self.setHz(val*1e9)

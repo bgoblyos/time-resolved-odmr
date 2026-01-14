@@ -21,6 +21,8 @@ import Devices.AWG
 import Devices.LockIn
 import Devices.Sweeper
 from Devices.PicoPulse import PicoPulse
+from Devices.LO import KuhnePLL
+
 
 import pyvisa
 import matplotlib.pyplot as plt
@@ -35,6 +37,8 @@ awg2_addr = 'USB0::0xF4EC::0x1103::SDG1XDDC801272::INSTR'
 lock_addr = 'GPIB0::8::INSTR'
 sweeper_addr = 'GPIB0::11::INSTR'
 pico_addr = 'ASRL3::INSTR'
+osc_addr = 'COM4'
+counter_addr = 'GPIB0::2::INSTR'
 #%% Measure noise
 rm = pyvisa.ResourceManager()
 awg1 = Devices.AWG.SDG1062X(rm, 'USB0::0xF4EC::0x1103::SDG1XDDC801291::INSTR', internal_oscillator=True)
@@ -179,97 +183,43 @@ plt.errorbar(result.Tau, result.Rmean, yerr = result.Rstd)
 #plt.ylim(1.7e-5, 1.9e-5)
 plt.xscale("log")
 plt.show()
-#%%
-rm = pyvisa.ResourceManager()
-pico = rm.open_resource(pico_addr)
-
-def wrap_query(str):
-    print(f"Query: {repr(str)}")
-    resp = pico.query(str)
-    print(f"Response: {repr(resp)}")
-    return resp
-
-for mw in [20,30,40,50,60,70,80,90,100]:
-    # Lock-in reference signal
-    halft = 1000000
-    wait1 = 13000
-    #mw = 20
-    seq = f"{wait1},1,{mw},3,{halft-mw-wait1},1,{halft},0"
-    wrap_query(f"PULSE 0 {1 << 32 - 1} {seq}")
-    time.sleep(1)
-
-    
-# awg1 = Devices.AWG.SDG1062X(rm, awg1_addr, internal_oscillator=True)
-# lock = Devices.LockIn.SR830M(rm, lock_addr)
-
-# #awg1.output(1, False)
-# #awg1.output(2, False)
-
-# srate = 8.2e6
-# fl = lock.snap()["Ref"]
-# ti = 100 # 10 us
-# delay = srate/fl/2 - ti
-
-# sequence = pd.DataFrame(
-#     columns = ["length", "L", "I", "Q"],
-#     data = [
-#         [ti,    True, False, False],
-#         [delay, False, False, False],
-#         [ti,    True, False, False],
-#     ]
-# )
-
-# Lp, Ln, I, Q = Devices.AWG.seq_to_waveforms(sequence)
-
-
-# awg1.set_waveform_exact(
-#      1, Lp, samplerate=srate, amp = 20, name = "Lp")
-# awg1.set_waveform_exact(
-#      2, Ln, samplerate=srate, amp = 20, name = "Ln")
- 
-# # Set up burst and enable AWG outputs
-# awg1.burst_ext(1)
-# awg1.burst_ext(2)
-# awg1.device.query("*OPC?")
-# #awg1.output(1, True)
-# #awg1.output(2, True)
-# awg1.device.query("*OPC?")
-
-
-rm.close()
 #%% Rabi definitions
 
 
 def rabi(mw, mw_freq = None, settle = 1, integrate = 1, comment = "None"):
     rm = pyvisa.ResourceManager()
-    pico = rm.open_resource(pico_addr)
     lock = Devices.LockIn.SR830M(rm, lock_addr)
+    pico = PicoPulse(rm, pico_addr)
     sweeper = Devices.Sweeper.HP83752A(rm, sweeper_addr)
     
     if mw_freq is not None:
         sweeper.setCW(mw_freq)
     
-    # Lock-in reference signal
-    #halft = 1000000
-    #wait1 = 50
-    #mw = 20
-    #seq = f"{halft-mw-wait1},1,{mw},3,{wait1},1,{halft},0"
+    laser_on =  90000   # 90 us
+    laser_off = 10000   # 10 ms
+    cycles = 100
     
-    laser_on = 90000
-    laser_off = 10000
-    padding = 500
-    delay = laser_on + laser_off
-    halft = 1000000
-    if mw + padding + 40 > laser_off:
-        return {"Errors" : ["Microwave cycle too long"]}
+    temp = []
     
-    if mw >= 20:
-        mw_seq = f"{laser_on},1,{laser_off - mw - padding},1,{mw},3,{padding},1,"
-        seq = f"{delay},1,{9 * mw_seq}{halft},0"
-    else:
-        seq = f"{halft},1,{halft},0"    
+    # Microwave cycle
+    for i in range(cycles):
+        temp.append([laser_off-mw, 1, 0, 0, 0])
+        temp.append([mw,           1, 0, 1, 1])
+        temp.append([laser_on,     1, 1, 0, 0])
+        
+    # Reference cycle
+    for i in range(cycles):
+        temp.append([laser_off-mw, 0, 0, 0, 0])
+        temp.append([mw,           0, 0, 0, 0])
+        temp.append([laser_on,     0, 1, 0, 0])
     
-    pico.query(f"PULSE 0 {1 << 32 - 1} {seq}")
+    sequence = pd.DataFrame(
+        columns = ["time", "ch1", "ch2", "ch3", "ch4"],
+        data = temp
+    )
+    
+    pico.sendSequence(sequence, cycle = False)
+
     
     # Clear buffer and set up lock-in data collection
     lock.device.write("TSTR")
@@ -310,9 +260,9 @@ def rabi(mw, mw_freq = None, settle = 1, integrate = 1, comment = "None"):
         "Thetas": Thetas,
         "settle_s": settle,
         "integrate_s": integrate,
-        "seq": seq,
-        "halfperiod_ns": halft,
-        "padding_ns": padding,
+        "seq": sequence,
+        #"halfperiod_ns": halft,
+        #"padding_ns": padding,
         "Fref_Hz": resp["Ref"],
         "comment": comment,
         "mw_freq_Hz": mw_freq,
@@ -340,19 +290,21 @@ def rabi_iterated(mws, freqs = [None], savedir = None, **kwargs):
     return data
     
 #%%
-mws = np.arange(10, 6000, 10)
-#np.random.shuffle(mws)
-mws = np.flip(mws)
+mws = np.arange(20, 5000, 100)
+np.random.shuffle(mws)
+#mws = np.flip(mws)
 
 result = rabi_iterated(
     mws,
-    [2.6051], #np.linspace(2.6051-0.25, 2.6051 + 0.25, 3), #
+    [2.7666],
     savedir = "E:/Rabi/",
-    settle = 0.5,
-    integrate = 1,
-    comment = "Split resonance, 20 dB attenuator before amp",
+    settle = 2,
+    integrate = 3,
+    comment = "90% duty cycle, 10 dBm on sweeper",
 )
-plt.errorbar(result.mw_ns, result.Rmean, yerr = result.Rstd)
+plt.errorbar(result.mw_ns, 1000*result.Rmean, yerr = result.Rstd, fmt=".")
+plt.xlabel("Microwave cycle (ns)")
+plt.ylabel("Lock-in signal (mV)")
 result
 
 #%% CW
@@ -414,15 +366,6 @@ plt.plot(df.freqs, df.R)
 #%%
 plt.scatter(df.freqs, df.R)
 plt.xlim(2.72, 2.9)
-
-#%%
-rm =  pyvisa.ResourceManager()
-pico = rm.open_resource(pico_addr)
-
-seq = "1000000,3,1000000,3"
-pico.query(f"PULSE 0 {1 << 32 - 1} {seq}")
-
-rm.close()
 #%% Sweeper diagnostics
 rm = pyvisa.ResourceManager()
 
@@ -470,9 +413,7 @@ transient_seq = pd.DataFrame(
 laser_noise_seq = pd.DataFrame(
     columns = ["time", "ch1", "ch2", "ch3", "ch4"],
     data = [
-        [1e6, 1, 0, 0, 0],
         [1e6, 1, 1, 0, 0],
-        [1e6, 0, 0, 0, 0],
         [1e6, 0, 1, 0, 0],
     ]
 )
@@ -489,7 +430,7 @@ pl_lock_seq = pd.DataFrame(
 rm = pyvisa.ResourceManager()
 pico = PicoPulse(rm, pico_addr)
 
-res = pico.sendSequence(laser_seq, cycle = False)
+res = pico.sendSequence(idle_seq, cycle = False)
 
 rm.close()
 res
@@ -607,7 +548,7 @@ def CWiterated(fs, savedir = None, **kwargs):
     return data
 
 #%%
-fs = np.linspace(2.675, 3.1, 36000)
+fs = np.linspace(2.76, 2.77, 120)
 #fs = np.linspace(2.725, 2.750, 100)
 np.random.shuffle(fs)
 
@@ -620,3 +561,104 @@ result = CWiterated(
 )
 plt.errorbar(result.f, result.Rmean, yerr = result.Rstd, fmt = ".")
 result
+#%% Kuhne LO
+from Devices.LO import KuhnePLL
+
+osc = KuhnePLL(osc_addr)
+
+osc.setGHz(2.7666)
+osc.sendCommand("A1")
+    
+del osc
+
+#%%
+def readPower(freq_hz, wait = 5.0):
+   
+    osc = KuhnePLL(osc_addr)
+    osc.setHz(freq_hz) 
+    del osc
+    
+    time.sleep(wait)
+    
+    freq_mhz = round(freq_hz / 1e6)
+    
+    rm = pyvisa.ResourceManager()
+    counter = rm.open_resource(counter_addr)
+    counter.read_termination = '\r'
+    counter.write("PA")
+    counter.write("BR")
+    counter.write("FH 7000")
+    counter.write("FL 950")
+    counter.write(f"CF {freq_mhz}")
+    resp = counter.read()
+    rm.close()
+    freq_meas, power = [float(x.strip()) for x in resp.split(',')]
+    return {
+        "target_Hz": freq_hz,
+        "meas_Hz": freq_meas,
+        "meas_dBm": power
+    }
+
+freqs = np.linspace(1e9, 6.85e9, 5000)
+temp = []
+
+for i in tqdm.tqdm(freqs):
+    temp.append(readPower(i, wait = 12))
+
+df = pd.DataFrame.from_dict(temp)
+name = "Kuhne_direct_highres"
+timestamp = round(time.time())
+df.to_json(f"E:/Oscillator/{name}_{timestamp}.json")
+#%%
+plt.scatter(df.target_Hz, df.meas_dBm)
+plt.xlim(0.95e9,6.9e9)
+
+#%%
+import scipy as sc
+mask = np.abs(df.target_Hz - df.meas_Hz) < 1e9
+#plt.scatter(df.meas_Hz[mask], df.meas_dBm[mask])
+
+filtered = sc.ndimage.median_filter(df.meas_dBm[mask], size = 50)
+plt.scatter(df.meas_Hz[mask], filtered)
+plt.xlim(2.5e9, 3e9)
+
+# %%
+def readPowerAlt(freq_hz, wait = 5.0):
+   
+    rm= pyvisa.ResourceManager()
+    sweeper = Devices.Sweeper.HP83752A(rm, sweeper_addr)
+        
+    sweeper.setCW(freq_hz/1e9)
+    
+    time.sleep(wait)
+    
+    freq_mhz = round(freq_hz / 1e6)
+    
+    rm = pyvisa.ResourceManager()
+    counter = rm.open_resource(counter_addr)
+    counter.read_termination = '\r'
+    counter.write("PA")
+    counter.write("BR")
+    counter.write("FH 7000")
+    counter.write("FL 950")
+    counter.write(f"CF {freq_mhz}")
+    resp = counter.read()
+    rm.close()
+    freq_meas, power = [float(x.strip()) for x in resp.split(',')]
+    return {
+        "target_Hz": freq_hz,
+        "meas_Hz": freq_meas,
+        "meas_dBm": power
+    }
+
+freqs = np.linspace(1e9, 20e9, 720)
+temp = []
+
+for i in tqdm.tqdm(freqs):
+    temp.append(readPowerAlt(i, wait = 5))
+
+df = pd.DataFrame.from_dict(temp)
+name = "sweeper_0dBm_female_male_SMA"
+timestamp = round(time.time())
+df.to_json(f"E:/Oscillator/{name}_{timestamp}.json")
+plt.scatter(df.target_Hz, df.meas_dBm)
