@@ -102,17 +102,126 @@ class SR830M():
                 [14, None,     "Trigger"  ]
             ]
         )
+        
+        self.disp1Dict = {
+            "X": 0,
+            "R": 1,
+            "XN": 2,
+            "XNOISE": 2,
+            "A1": 3,
+            "AUX1": 3,
+            "A2": 4,
+            "AUX2": 4,
+        }
+        
+        self.disp2Dict = {
+            "Y": 0,
+            "THETA": 1,
+            "Θ": 1,
+            "YN": 2,
+            "YNOISE": 2,
+            "A3": 3,
+            "AUX3": 3,
+            "A4": 4,
+            "AUX4": 4,
+        }
+        
+        self.snapDict = {
+             "X": 1,
+             "Y": 2,
+             "R": 3,
+             "THETA": 4,
+             "Θ": 4,
+             "A1": 5,
+             "AUX1": 5,
+             "A2": 6,
+             "AUX2": 6,
+             "A3": 7,
+             "AUX3": 7,
+             "A4": 8,
+             "AUX4": 8,
+             "REF": 9,
+             "FREQ": 9,
+             "DISP1": 10,
+             "D1": 10,
+             "CH1": 10,
+             "DISP2": 11,
+             "D2": 11,
+             "CH2": 11,
+        }
+        
+    def setDisplay(self, disp, target, ratio = 0):
+        """
+        Sets a specified display on the lock-in to a given value.
+        Required for automated data collection.
 
-    # Queries either X,Y,R,Theta,Ref or the 4 aux channels plus two display values
-    def snap(self, aux = False):
-        if aux:
-            labels = ["AUX1", "AUX2", "AUX3", "AUX4", "DISP1", "DISP2"]
-            data = self.device.query("SNAP? 5,6,7,8,10,11").split(',')
+        Parameters
+        ----------
+        disp: int
+        target : str
+            Select value to be displayed.
+            Possible values for display 1: "X", "R", "XNOISE", "AUX1", "AUX2".
+            Possible values for display 2: "Y", "THETA", "YNOISE", "AUX3", "AUX4".
+        ratio : int, optional
+            Display ratio. 0 is none, 1 is AUX1, 2 is AUX2. The default is 0.
+
+        Returns
+        -------
+        True on success, False on failure.
+        """
+        
+        if disp not in [1, 2]:
+            print("Please select display 1 or 2.")
+            return False
+        
+        dispDict = self.disp1Dict if disp == 1 else self.disp2Dict
+        
+        target = target.upper()
+        if target in dispDict:
+            i = dispDict[target]
+            cmd = f"DDEF {disp},{i},{ratio}"
+            self.device.write(cmd)
+            return True
         else:
-            labels = ["X", "Y", "R", "Theta", "Ref"]
-            data = self.device.query("SNAP? 1,2,3,4,9").split(',')
+            available = ", ".join(dispDict.keys())
+            print(f"The requested value is invalid. Request: {target}. Available values: {available}")
+            return False
 
-        return {labels[i]: float(data[i]) for i in range(len(labels))}
+    def snapshot(self, params):
+        if type(params) == str:
+            params = [params]
+            
+        if len(params) > 6:
+            print("At most 6 parameters may be read out at once.")
+            return None
+        elif len(params) < 1:
+            print("At least one parameter must be read out.")
+            return None
+        
+        indices = []
+        for p in params:
+            P = p.upper()
+            if P in self.snapDict:
+                indices.append(str(self.snapDict[P]))
+            else:
+                available = ", ".join(self.snapDict.keys())
+                print(f"A requested value is invalid. Request: {P}. Available values: {available}")
+                return 0
+        
+        if len(indices) == 1:
+            indices.append(indices[0])
+            joined = ",".join(indices)
+            cmd = "SNAP? " + joined
+            print(cmd)
+            resp = self.device.query(cmd)
+            return list(map(float, resp.split(',')))[0:1]
+
+        else:
+            joined = ",".join(indices)
+            cmd = "SNAP? " + joined
+            print(cmd)
+            resp = self.device.query(cmd)
+            return list(map(float, resp.split(',')))
     
     def readBinNum(self):
         res = self.device.query('SPTS?')
@@ -160,4 +269,3 @@ class SR830M():
 
     # TODO: Implement function which takes in a desired sample rate,
     # finds the closest achievable value, sets it and returns the result.
-
