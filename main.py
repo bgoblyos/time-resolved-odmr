@@ -111,7 +111,7 @@ def T1(tau, ti, tr, halft = 1e7, settle = 10, integrate = 10, comment = ""):
     
     # Clear buffer and set up lock-in data collection
     lock.device.write("TSTR")
-    lock.device.write("SRAT 7")
+    lock.device.write("SRAT 2") # 1/4 Hz
     lock.device.write("SEND 0")
     lock.device.write("PAUS;REST")
     # Wait for system to settle and trigger the data collection
@@ -119,16 +119,16 @@ def T1(tau, ti, tr, halft = 1e7, settle = 10, integrate = 10, comment = ""):
     lock.device.write("TRIG")
     
     # Wait for data to be collected
-    time.sleep(integrate)
+    time.sleep(integrate + 0.25)
     
     # Stop data collection
     lock.device.write("PAUS")
     
     # Retrieve data
-    data = list(map(float, lock.device.query(f"TRCA?1,0,{integrate * 8}").split(',')[:-1]))
+    data = list(map(float, lock.device.query(f"TRCA?1,0,{integrate // 4}").split(',')[:-1]))
     mean = np.mean(data)
     std = np.std(data)
-    resp = lock.snap()
+    #resp = lock.snap()
     
     rm.close()
     
@@ -139,9 +139,9 @@ def T1(tau, ti, tr, halft = 1e7, settle = 10, integrate = 10, comment = ""):
         "Tinit": ti,
         "Tread": tr,
         "Tau": tau,
-        "Theta": resp["Theta"],
-        "X": resp["X"],
-        "Y": resp["Y"],
+        #"Theta": resp["Theta"],
+        #"X": resp["X"],
+        #"Y": resp["Y"],
         "Fref": 1e9/halft,
         "Comment": comment,
     }
@@ -168,13 +168,13 @@ def T1iterated(taus, tis, trs, savedir = None, **kwargs):
     return data
 #%%
 result = T1iterated(
-    np.geomspace(1e3,6e6,20),
+    np.geomspace(1e3,6e6,30),
     [50e3], #[5, 10, 15, 20, 25, 30, 35, 40, 45, 50],
     [10e3], #[1,2,3,4,5,6,7,8,9,10],
     savedir = "E:/T1",
-    settle = 5,
-    integrate = 25,
-    comment = "40 dB detector gain, high reserve"
+    settle = 20,
+    integrate = 100,
+    comment = "40 dB detector gain, high reserve, 3s time constant"
 )
 plt.errorbar(result.Tau, result.Rmean, yerr = result.Rstd)
 plt.xscale("log")
@@ -437,15 +437,12 @@ res
 
 # %% CW, no sweep
 
-def CWalt(f, settle = 10, integrate = 10, comment = ""):
+def CWalt(f, lock, osc, settle = 10, integrate = 10, comment = ""):
+
+    osc.setGHz(f)
     
-    rm = pyvisa.ResourceManager()
-    # pico = PicoPulse(rm, pico_addr)
-    lock = Devices.LockIn.SR830M(rm, lock_addr)
-    sweeper = Devices.Sweeper.HP83752A(rm, sweeper_addr)
-        
-    sweeper.setCW(f)
-    sweeper.powerOn()
+    del osc
+    #sweeper.setCW(f)
     
     # CW_seq = pd.DataFrame(
     #     columns = ["time", "ch1", "ch2", "ch3", "ch4"],
@@ -478,20 +475,20 @@ def CWalt(f, settle = 10, integrate = 10, comment = ""):
     data = lock.readBuffer(1, 0, integrate * 32)
     mean = np.mean(data)
     std = np.std(data)
-    resp = lock.snap()
+    #resp = lock.snap()
     
-    sweeper.powerOff()
+    #sweeper.powerOff()
     
-    rm.close()
+    #rm.close()
     
     return {
         "Rs": data,
         "Rmean": mean,
         "Rstd": std,
         "f": f,
-        "Theta": resp["Theta"],
-        "X": resp["X"],
-        "Y": resp["Y"],
+        #"Theta": resp["Theta"],
+        #"X": resp["X"],
+        #"Y": resp["Y"],
         "Comment": comment,
     }
     
@@ -532,10 +529,18 @@ def CWiterated(fs, savedir = None, **kwargs):
     results = []
     pbar = tqdm.tqdm(total = len(fs))
     
+    rm = pyvisa.ResourceManager()
+    # pico = PicoPulse(rm, pico_addr)
+    lock = Devices.LockIn.SR830M(rm, lock_addr)
+    #sweeper = Devices.Sweeper.HP83752A(rm, sweeper_addr)
+    osc = KuhnePLL(osc_addr)
+    
     for f in fs:
-        results.append(CWalt(f, **kwargs))
+        results.append(CWalt(f, lock, osc, **kwargs))
         pbar.update(1)
                 
+    del osc
+    rm.close()
     data = pd.DataFrame.from_dict(results)
     pbar.close()
     
@@ -548,16 +553,16 @@ def CWiterated(fs, savedir = None, **kwargs):
     return data
 
 #%%
-fs = np.linspace(2.76, 2.77, 120)
-#fs = np.linspace(2.725, 2.750, 100)
+#fs = np.linspace(2.76, 2.77, 120)
+fs = np.linspace(2.7, 3.05, 1800)
 np.random.shuffle(fs)
 
 result = CWiterated(
     fs,
-    savedir = "E:/CW/Hyperfine/",
-    settle = 0.25,
-    integrate = 0.75,
-    comment = "15 mW laser, -15 dBm sweeper",
+    savedir = "E:/CW/Kuhne/",
+    settle = 0.05,
+    integrate = 0.15,
+    comment = "85 mW laser, sweeper for reference",
 )
 plt.errorbar(result.f, result.Rmean, yerr = result.Rstd, fmt = ".")
 result
@@ -567,7 +572,7 @@ from Devices.LO import KuhnePLL
 osc = KuhnePLL(osc_addr)
 
 osc.setGHz(2.7666)
-osc.sendCommand("A1")
+#osc.sendCommand("A1")
     
 del osc
 
@@ -662,3 +667,10 @@ name = "sweeper_0dBm_female_male_SMA"
 timestamp = round(time.time())
 df.to_json(f"E:/Oscillator/{name}_{timestamp}.json")
 plt.scatter(df.target_Hz, df.meas_dBm)
+
+#%%
+from Devices.LockIn import SR830M
+rm.close()
+rm = pyvisa.ResourceManager()
+
+lock = SR830M(rm, lock_addr)
