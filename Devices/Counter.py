@@ -1,4 +1,20 @@
 """
+Copyright (C) 2026 Bence Göblyös
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, version 3.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program. If not, see https://www.gnu.org/licenses/.
+"""
+
+
+"""
 Phase Matrix 25B frequency counter
 
 Only used for develeopment, the device is not present in the student lab setup.

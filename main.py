@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Copyright (C) 2025 Bence Göblyös
+Copyright (C) 2025-2026 Bence Göblyös
 
 This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -32,60 +32,11 @@ import time
 import tqdm
 
 #%%
-awg1_addr = 'USB0::0xF4EC::0x1103::SDG1XDDC801291::INSTR' 
-awg2_addr = 'USB0::0xF4EC::0x1103::SDG1XDDC801272::INSTR'
 lock_addr = 'GPIB0::8::INSTR'
 sweeper_addr = 'GPIB0::11::INSTR'
 pico_addr = 'ASRL3::INSTR'
 osc_addr = 'COM4'
 counter_addr = 'GPIB0::2::INSTR'
-#%% Measure noise
-rm = pyvisa.ResourceManager()
-awg1 = Devices.AWG.SDG1062X(rm, 'USB0::0xF4EC::0x1103::SDG1XDDC801291::INSTR', internal_oscillator=True)
-lock = Devices.LockIn.SR830M(rm, 'GPIB0::8::INSTR')
-
-Rs = []
-Xns = []
-Yns = []
-delays = [1] #np.linspace(1, 15000, 100)
-for delay in delays:
-    awg1.output(1, False)
-    awg1.output(2, False)
-    fl = lock.snap()["Ref"]
-    sequence = pd.DataFrame(
-        columns = ["time_us", "L", "I", "Q"],
-        data = [
-            [delay, False, False, False],
-            [2, True, False, False],
-            [10, False, False, False],
-        
-        ]
-    )
-    
-    Lp, Ln, I, Q, samplerate = Devices.AWG.seq_to_waveforms(sequence, fl)
-    
-    
-    awg1.set_waveform_exact(
-        1, Lp, samplerate=samplerate, amp = 20, name = "Lp")
-    awg1.set_waveform_exact(
-        2, Ln, samplerate=samplerate, amp = 20, name = "Ln")
-    
-    awg1.burst_ext(1)
-    awg1.burst_ext(2)
-    awg1.device.query("*OPC?")
-    awg1.output(1, True)
-    awg1.output(2, True)
-    awg1.device.query("*OPC?")
-    
-    
-    time.sleep(15)
-    
-    res1 = lock.snap()
-    res2 = lock.snap(aux=True)
-    
-    Rs.append(res1["R"])
-    Xns.append(res2["DISP1"])
-    Yns.append(res2["DISP2"])
 #%% T1
 def T1(tau, ti, tr, halft = 1e7, settle = 10, integrate = 10, comment = ""):
     
@@ -434,145 +385,10 @@ res = pico.sendSequence(idle_seq, cycle = False)
 
 rm.close()
 res
-
-# %% CW, no sweep
-
-def CWalt(f, lock, osc, settle = 10, integrate = 10, comment = ""):
-
-    osc.setGHz(f)
-    
-    del osc
-    #sweeper.setCW(f)
-    
-    # CW_seq = pd.DataFrame(
-    #     columns = ["time", "ch1", "ch2", "ch3", "ch4"],
-    #     data = [
-    #         [1e6, 1, 1, 1, 1],
-    #         [1e6, 0, 1, 0, 0]
-    #     ]
-    # )
-
-    # pico.sendSequence(CW_seq, cycle = False)
-    
-    #TODO: Set display 1 to R programmatically
-    
-    # Clear buffer and set up lock-in data collection
-    lock.device.write("TSTR")
-    lock.device.write("SRAT 9") # 32 Hz
-    lock.device.write("SEND 0")
-    lock.device.write("PAUS;REST")
-    # Wait for system to settle and trigger the data collection
-    time.sleep(settle)
-    lock.device.write("TRIG")
-    
-    # Wait for data to be collected
-    time.sleep(integrate)
-    
-    # Stop data collection
-    lock.device.write("PAUS")
-    
-    # Retrieve data
-    data = lock.readBuffer(1, 0, integrate * 32)
-    mean = np.mean(data)
-    std = np.std(data)
-    #resp = lock.snap()
-    
-    #sweeper.powerOff()
-    
-    #rm.close()
-    
-    return {
-        "Rs": data,
-        "Rmean": mean,
-        "Rstd": std,
-        "f": f,
-        #"Theta": resp["Theta"],
-        #"X": resp["X"],
-        #"Y": resp["Y"],
-        "Comment": comment,
-    }
-    
-
-def picoIdle():
-    idle_seq = pd.DataFrame(
-        columns = ["time", "ch1", "ch2", "ch3", "ch4"],
-        data = [
-            [1e6, 1, 0, 0, 0],
-            [1e6, 0, 0, 0, 0]
-        ]
-    )
-    
-    rm = pyvisa.ResourceManager()
-    pico = PicoPulse(rm, pico_addr)
-    pico.sendSequence(idle_seq, cycle = False)
-    rm.close()
-
-
-def picoCW():
-    CW_seq = pd.DataFrame(
-        columns = ["time", "ch1", "ch2", "ch3", "ch4"],
-        data = [
-            [1e6, 1, 1, 1, 1],
-            [1e6, 0, 1, 0, 0]
-            ]
-        )
-    
-    rm = pyvisa.ResourceManager()
-    pico = PicoPulse(rm, pico_addr)
-    pico.sendSequence(CW_seq, cycle = False)
-    rm.close()
-
-def CWiterated(fs, savedir = None, **kwargs):
-
-    picoCW()
-
-    results = []
-    pbar = tqdm.tqdm(total = len(fs))
-    
-    rm = pyvisa.ResourceManager()
-    # pico = PicoPulse(rm, pico_addr)
-    lock = Devices.LockIn.SR830M(rm, lock_addr)
-    #sweeper = Devices.Sweeper.HP83752A(rm, sweeper_addr)
-    osc = KuhnePLL(osc_addr)
-    
-    for f in fs:
-        results.append(CWalt(f, lock, osc, **kwargs))
-        pbar.update(1)
-                
-    del osc
-    rm.close()
-    data = pd.DataFrame.from_dict(results)
-    pbar.close()
-    
-    picoIdle()
-    
-    if savedir is not None:
-        timestamp = round(time.time())
-        data.to_json(f"{savedir}/{timestamp}.json")
-    
-    return data
-
 #%%
-#fs = np.linspace(2.76, 2.77, 120)
-fs = np.linspace(2.7, 3.05, 1800)
-np.random.shuffle(fs)
-
-result = CWiterated(
-    fs,
-    savedir = "E:/CW/Kuhne/",
-    settle = 0.05,
-    integrate = 0.15,
-    comment = "85 mW laser, sweeper for reference",
-)
-plt.errorbar(result.f, result.Rmean, yerr = result.Rstd, fmt = ".")
-result
-#%% Kuhne LO
-from Devices.LO import KuhnePLL
-
 osc = KuhnePLL(osc_addr)
 
 osc.setGHz(2.7666)
-#osc.sendCommand("A1")
     
 del osc
 
@@ -667,10 +483,3 @@ name = "sweeper_0dBm_female_male_SMA"
 timestamp = round(time.time())
 df.to_json(f"E:/Oscillator/{name}_{timestamp}.json")
 plt.scatter(df.target_Hz, df.meas_dBm)
-
-#%%
-from Devices.LockIn import SR830M
-rm.close()
-rm = pyvisa.ResourceManager()
-
-lock = SR830M(rm, lock_addr)

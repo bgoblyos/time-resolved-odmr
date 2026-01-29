@@ -14,7 +14,9 @@ this program. If not, see https://www.gnu.org/licenses/.
 """
 
 import pandas as pd
+import numpy as np
 import struct
+import time
 
 class SR830M():
     def __init__(self, rm, address):
@@ -150,7 +152,7 @@ class SR830M():
              "CH2": 11,
         }
        
-    def setSensitivity(self, target, setMode = true):
+    def setSensitivity(self, target, setMode = True):
         """
         Sets a specified sensitivity. 
 
@@ -268,10 +270,6 @@ class SR830M():
                 i = self.srateDF.i[res[0,0]]
                 self.device.write(f"SRAT {i}")
                 return self.srateDF.srate[res[0,0]]
-        
-        else:
-            print("[SR830M] Sample rate input type is invalid.")
-            return -1
 
         elif type(target) is int:
             if target in self.srateDF.i:
@@ -280,6 +278,10 @@ class SR830M():
             else:
                 print("[SR830M] Requested sample rate index is invalid.")
                 return -1
+            
+        else:
+            print("[SR830M] Sample rate input type is invalid.")
+            return -1
 
     def setSamplerateHz(self, target):
         row = np.argmin(np.abs(self.srateDF.srate - target))
@@ -574,14 +576,14 @@ class SR830M():
 
        if bufferSize == 0:
            #logging.warning("The lock-in buffer is empty, nothing could be retrieved.")
-           return []
+           return None
 
        if numPoints <= 0:
            numPoints = bufferSize - firstPoint
 
        if (firstPoint >= bufferSize) or (firstPoint < 0):
            #logging.warning(f"Starting index is out of bounds (requested index {firstPoint} from {bufferSize} elements)")
-           return []
+           return None
 
        if (firstPoint + numPoints) > bufferSize:
            #logging.info("Requested too many points, clamping it.")
@@ -589,3 +591,87 @@ class SR830M():
 
        queryStr = f"TRCB ? {buffer}, {firstPoint}, {numPoints}"
        return self.queryBinaryFloat(queryStr)
+   
+    def resetBuffer(self):
+        self.device.write("REST")
+        
+    def triggerBuffer(self):
+        self.device.write("TRIG")
+        
+    def pauseBuffer(self):
+        self.device.write("PAUS")
+   
+    def multiRead(self, ch1 = None, ch2 = None, t = 1, srate = None):
+        """
+        Capture the given data on each channel for an amount of time and return the results.
+
+        Parameters
+        ----------
+        ch1 : str, optional
+            Value to capture on channel 1. Possible values: "X", "R", "XNOISE", "AUX1", "AUX2".
+            Use None to disable this channel. The default is None.
+        ch2 : str, optional
+            Value to capture on channel 1. Possible values: "Y", "THETA", "YNOISE", "AUX3", "AUX4".
+            Use None to disable this channel. The default is None.
+        t : float, optional
+            Acqusition time in seconds. The default is 1.
+        srate : float, optional
+            Sampling rate in Hz. If set to None, the highest available sampling rate is selected for the current time constant.
+            The default is None.
+
+        Returns
+        -------
+        ch1
+            Numpy array of floats containing the data from channel 1.
+        ch2
+            Numpy array of floats containing the data from channel 2.
+
+        """
+        readCh1 = False
+        readCh2 = False
+        
+        if ch1 is not None:
+           readCh1 = self.setDisplay(1, ch1)
+
+        if ch2 is not None:
+           readCh2 = self.setDisplay(2, ch2)
+           
+        if (not readCh1) and (not readCh2):
+            return None, None
+        
+        if srate is None:
+            srate = self.setSampleRate(None)
+        else:
+            srate = self.setSamplerateHz(srate)
+            
+        if srate <= 0:
+            print("[SR80M] Failed to set sample rate for acqusition.")
+            return None, None
+        
+        if 1/srate > t:
+            print("[SR830M] Sampling is too slow for the selected time period.")
+            return None, None
+        
+        n = np.floor(srate * t)
+        
+        self.pauseBuffer()
+        self.resetBuffer()
+        self.triggerBuffer()
+        
+        time.sleep(t)
+        
+        dataCh1 = None
+        dataCh2 = None
+        
+        self.pauseBuffer()
+        
+        if readCh1:
+            dataCh1 = self.readBuffer(1, 0, n)
+        
+        if readCh2:
+            dataCh2 = self.readBuffer(2, 0, n)
+            
+        return dataCh1, dataCh2
+
+        
+        
