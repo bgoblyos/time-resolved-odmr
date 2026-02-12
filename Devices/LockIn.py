@@ -177,10 +177,10 @@ class SR830M():
         current = False
 
         if type(target) is str:
-            if target in self.sensDF.Vstr:
+            if target in self.sensDF.Vstr.values:
                 row = np.argwhere(self.sensDF.Vstr == target)[0,0]
                 i = self.sensDF.i[row]
-            elif target in self.sensDF.Istr:
+            elif target in self.sensDF.Istr.values:
                 row = np.argwhere(self.sensDF.Istr == target)[0,0]
                 i = self.sensDF.i[row]
                 current = True
@@ -193,7 +193,7 @@ class SR830M():
                 target = -target
                 current = True
 
-            if target in self.sensDF.i:
+            if target in self.sensDF.i.values:
                 i = target
             else:
                 print("[SR830M] Requested sensitivity index is invalid.")
@@ -204,9 +204,9 @@ class SR830M():
             return -1, None
 
         if current and setMode:
-            self.setInputMode(0)
-        elif setMode:
             self.setInputMode(3)
+        elif setMode:
+            self.setInputMode(0)
 
         self.device.write(f"SENS {i}")
         
@@ -227,7 +227,7 @@ class SR830M():
     
     def getSensitivity(self):
         current = self.getInputMode() >= 2
-        i = int(self.query("SENS?")) 
+        i = int(self.device.query("SENS?")) 
         row = np.argwhere(self.sensDF.i == i)[0,0]
 
         if current:
@@ -272,7 +272,7 @@ class SR830M():
                 return self.srateDF.srate[res[0,0]]
 
         elif type(target) is int:
-            if target in self.srateDF.i:
+            if target in self.srateDF.i.values:
                 self.device.write(f"SRAT {target}")
                 return self.srateDF.srate[np.argwhere(self.srateDF.i == target)[0,0]]
             else:
@@ -297,7 +297,7 @@ class SR830M():
         -------
         (i, f): index and frequency in Hz
         """
-        resp = int(self.query("SRAT?"))
+        resp = int(self.device.query("SRAT?"))
         i = np.argwhere(self.srateDF.i == resp)[0,0]
         f = self.tauDF.srate[i]
         return resp, f
@@ -317,7 +317,7 @@ class SR830M():
         Achieved time constant (float). -1 indicates an error.
         """
         if type(target) is str:
-            res = np.argwhere(self.tauDF.tsrt == target)
+            res = np.argwhere(self.tauDF.tstr == target)
             if res.shape[0] < 1:
                 print("[SR830M] Requested time constant string is invalid.")
                 return -1
@@ -351,7 +351,7 @@ class SR830M():
         -------
         (i, t): index and time in seconds
         """
-        resp = int(self.query("OFLT?"))
+        resp = int(self.device.query("OFLT?"))
         i = np.argwhere(self.tauDF.i == resp)[0,0]
         t = self.tauDF.t[i]
         return resp, t
@@ -601,7 +601,7 @@ class SR830M():
     def pauseBuffer(self):
         self.device.write("PAUS")
    
-    def multiRead(self, ch1 = None, ch2 = None, t = 1, srate = None):
+    def multiRead(self, ch1 = None, ch2 = None, t = 1, srate = None, wait = False):
         """
         Capture the given data on each channel for an amount of time and return the results.
 
@@ -618,6 +618,11 @@ class SR830M():
         srate : float, optional
             Sampling rate in Hz. If set to None, the highest available sampling rate is selected for the current time constant.
             The default is None.
+        wait : bool, optiona
+            Whether to wait for all planned points to arrive.
+            If True, it will extent the desired time if there are not enough points in the buffer.
+            If False, will return all points gathered up until the desired timer is up.
+            The default is False.
 
         Returns
         -------
@@ -644,8 +649,10 @@ class SR830M():
         else:
             srate = self.setSamplerateHz(srate)
             
+        print(f"[SR830M] Sample rate is {srate}")
+            
         if srate <= 0:
-            print("[SR80M] Failed to set sample rate for acqusition.")
+            print("[SR830M] Failed to set sample rate for acqusition.")
             return None, None
         
         if 1/srate > t:
@@ -660,6 +667,13 @@ class SR830M():
         
         time.sleep(t)
         
+        if wait:
+            for i in range(100):
+                if self.readBinNum() >= n:
+                    break
+                else:
+                    time.sleep(0.1)
+            
         dataCh1 = None
         dataCh2 = None
         

@@ -18,7 +18,7 @@ this program. If not, see https://www.gnu.org/licenses/.
 
 #%% Imports
 import Devices.AWG
-import Devices.LockIn
+from Devices.LockIn import SR830M
 import Devices.Sweeper
 from Devices.PicoPulse import PicoPulse
 from Devices.LO import KuhnePLL

@@ -20,7 +20,7 @@ import time
 from tqdm import tqdm
 from Devices.LockIn import SR830M
 from Devices.LO import KuhnePLL
-from Device.PicoPulse import PicoPulse
+from Devices.PicoPulse import PicoPulse
 
 class CW():
     def __init__(self, lo_addr, lock_addr, pico_addr):
@@ -38,7 +38,7 @@ class CW():
         self.rm = pyvisa.ResourceManager()
         self.lo = KuhnePLL(self.lo_addr)
         self.lock = SR830M(self.rm, self.lock_addr)
-        self.pico = PicoPulse(self.rm, self.addr)
+        self.pico = PicoPulse(self.rm, self.pico_addr)
         
     def unloadDevices(self):
         self.lo = None
