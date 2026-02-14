@@ -17,8 +17,27 @@ this program. If not, see https://www.gnu.org/licenses/.
 pico-pulse sequence synthesizer
 """
 class PicoPulse():
-    def __init__(self, rm , addr):
+    def __init__(self, rm , addr, assignments = None):
+        """
+        Initialize pico-pulse device.
+
+        Parameters
+        ----------
+        rm : pyvisa.ResourceManager
+            Pass a pyvisa ResourceManager object to use for opening the device.
+        addr : str
+            VISA address of the pico-pulse device.
+        assignments : dict, optional
+            Dictinary defining channel assignments in the form of {'lockin': 'ch1'}.
+            The default is None.
+
+        Returns
+        -------
+        None.
+
+        """
         self.device = rm.open_resource(addr)
+        self.assignments = assignments
 
     def encodeSequence(self, seq, cycle = False, innerLoop = 0, outerLoop = None):
         cmd = ""
@@ -42,7 +61,11 @@ class PicoPulse():
 
         cmd += f" {n} "
 
-        #TODO: Check if dataframe has all the columns we need
+        if self.assignments is not None:
+            seq.rename(
+                columns = self.assignments,
+                inplace = True
+            )
 
         for i in range(len(seq)):
             t = round(seq.time[i])
