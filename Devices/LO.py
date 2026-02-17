@@ -21,10 +21,11 @@ import numpy as np # Math
 Kuhne MKU LO 8-13 PLL
 """
 class KuhnePLL():
-    def __init__(self, port, timeout = 1.0):
+    def __init__(self, port, timeout = 1.0, legacy = False):
         self.device = None
         self.port = port
         self.connect_timeout = timeout
+        self.legacy = legacy
         self.connect()
         
     def __del__(self):
@@ -71,7 +72,10 @@ class KuhnePLL():
 
         
         for (freq, prefix) in zip([ghz, mhz, khz, hz], ["G", "M", "k", "H"]):
-            cmd = f"{freq}{prefix}F1"
+            if self.legacy:
+                cmd = f"{freq}{prefix}F1"
+            else:
+                cmd = f"{prefix}FR{freq}\r\n"
             nchar, resp = self.sendCommand(cmd, timeout = 0.015, capture_output = True)
             if nchar == -1 or resp != "A":
                 print(resp)
