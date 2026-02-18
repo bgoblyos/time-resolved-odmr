@@ -21,6 +21,16 @@ import time
 class SR830M():
     def __init__(self, rm, address):
         self.device = rm.open_resource(address)
+
+        if "ASRL" in address:
+            print("Serial connection detected")
+            self.device.baud_rate = 19200
+            self.device.read_termination = '\r'
+            self.device.write_termination = '\r'
+            self.serial = True
+        else:
+            self.serial = False
+
         self.device.timeout = 100000
 
         self.bufferSize = 16383
@@ -564,6 +574,20 @@ class SR830M():
         self.device.timeout = oldTimeout
     
         return response
+    
+    def queryASCIIFloat(self, param):
+        # Increse timeout, otherwise the transfer takes too long
+        oldTimeout = self.device.timeout
+        self.device.timeout = 60000 # 1 minute
+    
+        resp = self.device.query(param)
+        
+        decoded = list(map(float, resp.strip(',').split(',')))
+    
+        # Reset the timeout
+        self.device.timeout = oldTimeout
+    
+        return decoded
 
     def queryBinaryFloat(self, param):
         response = self.queryBinary(param)
@@ -572,25 +596,29 @@ class SR830M():
         return list(data)
     
     def readBuffer(self, buffer, firstPoint = 0, numPoints = 0):
-       bufferSize = self.readBinNum()
+        bufferSize = self.readBinNum()
 
-       if bufferSize == 0:
-           #logging.warning("The lock-in buffer is empty, nothing could be retrieved.")
-           return None
+        if bufferSize == 0:
+            #logging.warning("The lock-in buffer is empty, nothing could be retrieved.")
+            return None
 
-       if numPoints <= 0:
-           numPoints = bufferSize - firstPoint
+        if numPoints <= 0:
+            numPoints = bufferSize - firstPoint
 
-       if (firstPoint >= bufferSize) or (firstPoint < 0):
-           #logging.warning(f"Starting index is out of bounds (requested index {firstPoint} from {bufferSize} elements)")
-           return None
+        if (firstPoint >= bufferSize) or (firstPoint < 0):
+            #logging.warning(f"Starting index is out of bounds (requested index {firstPoint} from {bufferSize} elements)")
+            return None
 
-       if (firstPoint + numPoints) > bufferSize:
-           #logging.info("Requested too many points, clamping it.")
-           numPoints = bufferSize - firstPoint
+        if (firstPoint + numPoints) > bufferSize:
+            #logging.info("Requested too many points, clamping it.")
+            numPoints = bufferSize - firstPoint
 
-       queryStr = f"TRCB ? {buffer}, {firstPoint}, {numPoints}"
-       return self.queryBinaryFloat(queryStr)
+        if self.serial:
+            queryStr = f"TRCA ? {buffer}, {firstPoint}, {numPoints}"
+            return self.queryASCIIFloat(queryStr)
+        else:
+            queryStr = f"TRCB ? {buffer}, {firstPoint}, {numPoints}"
+            return self.queryBinaryFloat(queryStr)
    
     def resetBuffer(self):
         self.device.write("REST")

@@ -14,8 +14,8 @@ tqdm = "*"
 pyvisa-py = "*"
 
 [dev-packages]
-spyder = "*"
 spyder-terminal = "*"
+spyder = "*"
 
 [requires]
-python_version = "3.13"
+python_version = "3.14"
