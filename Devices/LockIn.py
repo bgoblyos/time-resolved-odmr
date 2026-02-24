@@ -26,7 +26,7 @@ class SR830M():
             print("Serial connection detected")
             self.device.baud_rate = 19200
             self.device.read_termination = '\r'
-            self.device.write_termination = '\r'
+            self.device.write_termination = '\r\n'
             self.serial = True
         else:
             self.serial = False
@@ -547,14 +547,14 @@ class SR830M():
             indices.append(indices[0])
             joined = ",".join(indices)
             cmd = "SNAP? " + joined
-            print(cmd)
+            #print(cmd)
             resp = self.device.query(cmd)
             return list(map(float, resp.split(',')))[0:1]
 
         else:
             joined = ",".join(indices)
             cmd = "SNAP? " + joined
-            print(cmd)
+            #print(cmd)
             resp = self.device.query(cmd)
             return list(map(float, resp.split(',')))
     
