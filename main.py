@@ -30,11 +30,13 @@ import time                      # Delays
 import tqdm                      # Progress bars (use 'for i in tqdm.tqdm(iter)')
 
 #%% Constants
-lockin_addr = 'GPIB0::8::INSTR'
-sweeper_addr = 'GPIB0::11::INSTR'
-pico_addr = 'ASRL3::INSTR'
-osc_addr = 'COM4'
-counter_addr = 'GPIB0::2::INSTR'
+lockin_com_num = 8
+pico_com_num = 3
+osc_com_num = 4
+
+lockin_addr = f'ASRL{lockin_com_num}::INSTR'
+pico_addr = f'ASRL{pico_com_num}::INSTR'
+osc_addr = f'COM{osc_com_num}'
 
 pico_pins = {
     'lockin': 'ch1',
