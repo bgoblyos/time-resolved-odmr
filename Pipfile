@@ -12,6 +12,7 @@ pandas = "*"
 pyserial = "*"
 tqdm = "*"
 pyvisa-py = "*"
+jupyter = "*"
 
 [dev-packages]
 spyder-terminal = "*"

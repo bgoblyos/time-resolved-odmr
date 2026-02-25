@@ -63,7 +63,7 @@ class KuhnePLL():
             print(f"Sending command to oscillator failed with reason: {err}")
             return -1, err
 
-    def setHz(self, val):
+    def setHz(self, val, retries = 3):
         # TODO: Soft fail if device is None
         hz = str(round((np.floor(val) % 1000))).zfill(3)
         khz = str(round(np.floor(val*1e-3) % 1000)).zfill(3)
@@ -76,18 +76,29 @@ class KuhnePLL():
                 cmd = f"{freq}{prefix}F1"
             else:
                 cmd = f"{prefix}FR{freq}\r\n"
-            nchar, resp = self.sendCommand(cmd, timeout = 0.015, capture_output = True)
-            if nchar == -1 or resp != "A":
-                print(resp)
-                return False
             
+            successful = True
+            for attempt in range(retries + 1):
+                if i != 0:
+                    print(f"[KuhnePLL] Sending command failed, retrying (attempt {i}{retries}).")
+                
+                nchar, resp = self.sendCommand(cmd, timeout = 0.015, capture_output = True)
+                if nchar != -1 and resp == "A":
+                    successful = True
+                    break
+                else:
+                    successful = False
+            
+            if not successful:
+                raise ConnectionError("[KuhnePLL] Could not send command to device.")
+
         return True
     
-    def setkHz(self, val):
-        return self.setHz(val*1e3)
+    def setkHz(self, val, **kwargs):
+        return self.setHz(val*1e3, **kwargs)
     
-    def setMHz(self, val):
-        return self.setHz(val*1e6)
+    def setMHz(self, val, **kwargs):
+        return self.setHz(val*1e6, **kwargs)
     
-    def setGHz(self, val):
-        return self.setHz(val*1e9)
+    def setGHz(self, val, **kwargs):
+        return self.setHz(val*1e9, **kwargs)

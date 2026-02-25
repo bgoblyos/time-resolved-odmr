@@ -628,6 +628,12 @@ class SR830M():
         
     def pauseBuffer(self):
         self.device.write("PAUS")
+
+    def enableBuffer(self, state = True):
+        if state:
+            self.device.write("TSTR 1")
+        else:
+            self.device.write("TSTR 0")
    
     def multiRead(self, ch1 = None, ch2 = None, t = 1, srate = None, wait = False):
         """
@@ -691,6 +697,7 @@ class SR830M():
         
         self.pauseBuffer()
         self.resetBuffer()
+        self.enableTrigger()
         self.triggerBuffer()
         
         time.sleep(t)
@@ -715,5 +722,7 @@ class SR830M():
             
         return dataCh1, dataCh2
 
-        
+class SR830(SR830M):
+    pass
+
         
