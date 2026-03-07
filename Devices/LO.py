@@ -16,12 +16,19 @@ this program. If not, see https://www.gnu.org/licenses/.
 import serial      # Serial communication
 import time        # Timeout handling
 import numpy as np # Math
+import logging
 
 """
 Kuhne MKU LO 8-13 PLL
 """
 class KuhnePLL():
     def __init__(self, port, timeout = 1.0, legacy = False):
+        # Set up logger
+        self.logger = logging.getLogger('TR-ODMR.KuhnePLL')
+        self.logger.propagate = True
+        self.logger.setLevel(logging.NOTSET)
+        self.logger.debug("Logger initialized.")
+        
         self.device = None
         self.port = port
         self.connect_timeout = timeout
@@ -43,7 +50,7 @@ class KuhnePLL():
             )
             return True
         except serial.SerialException as err:
-            print(f"Failed to connect to oscillator with reason: {err}")
+            self.logger.error(f"Failed to connect to oscillator with reason: {err}")
             return False
 
     def sendCommand(self, cmd, timeout = 1.0, capture_output = True):
@@ -60,7 +67,7 @@ class KuhnePLL():
                 return nchar, None 
 
         except serial.SerialException as err:
-            print(f"Sending command to oscillator failed with reason: {err}")
+            self.logger.error(f"Sending command to oscillator failed with reason: {err}")
             return -1, err
 
     def setHz(self, val, retries = 3):
@@ -79,8 +86,8 @@ class KuhnePLL():
             
             successful = True
             for attempt in range(retries + 1):
-                if i != 0:
-                    print(f"[KuhnePLL] Sending command failed, retrying (attempt {i}{retries}).")
+                if attempt != 0:
+                    self.logger.warning(f"Sending command failed, retrying (attempt {attempt}/{retries}).")
                 
                 nchar, resp = self.sendCommand(cmd, timeout = 0.015, capture_output = True)
                 if nchar != -1 and resp == "A":
@@ -90,7 +97,8 @@ class KuhnePLL():
                     successful = False
             
             if not successful:
-                raise ConnectionError("[KuhnePLL] Could not send command to device.")
+                self.logger.error("Could not send command to device.")
+                return False
 
         return True
     

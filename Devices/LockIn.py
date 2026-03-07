@@ -17,13 +17,20 @@ import pandas as pd
 import numpy as np
 import struct
 import time
+import logging
 
 class SR830M():
     def __init__(self, rm, address):
+        # Set up logger
+        self.logger = logging.getLogger('TR-ODMR.SR830M')
+        self.logger.propagate = True
+        self.logger.setLevel(logging.NOTSET)
+        self.logger.debug("Logger initialized.")
+        
         self.device = rm.open_resource(address)
 
         if "ASRL" in address:
-            print("Serial connection detected")
+            self.logger.info("Serial connection detected")
             self.device.baud_rate = 19200
             self.device.read_termination = '\r'
             self.device.write_termination = '\r\n'
@@ -195,7 +202,7 @@ class SR830M():
                 i = self.sensDF.i[row]
                 current = True
             else:
-                print("[SR830M] Requested sensitivity string is invalid.")
+                self.logger.error("Requested sensitivity string is invalid.")
                 return -1, None
 
         elif type(target) is int:
@@ -206,11 +213,11 @@ class SR830M():
             if target in self.sensDF.i.values:
                 i = target
             else:
-                print("[SR830M] Requested sensitivity index is invalid.")
+                self.logger.error("Requested sensitivity index is invalid.")
                 return -1, None
         
         else:
-            print("[SR830M] Requested sensitivity type is invalid.")
+            self.logger.error("Requested sensitivity type is invalid.")
             return -1, None
 
         if current and setMode:
@@ -274,7 +281,7 @@ class SR830M():
         if type(target) is str:
             res = np.argwhere(self.srateDF.sratestr == target)
             if res.shape[0] < 1:
-                print("[SR830M] Requested sample rate string is invalid.")
+                self.logger.error("Requested sample rate string is invalid.")
                 return -1
             else:
                 i = self.srateDF.i[res[0,0]]
@@ -286,11 +293,11 @@ class SR830M():
                 self.device.write(f"SRAT {target}")
                 return self.srateDF.srate[np.argwhere(self.srateDF.i == target)[0,0]]
             else:
-                print("[SR830M] Requested sample rate index is invalid.")
+                self.logger.error("Requested sample rate index is invalid.")
                 return -1
             
         else:
-            print("[SR830M] Sample rate input type is invalid.")
+            self.logger.error("Sample rate input type is invalid.")
             return -1
 
     def setSamplerateHz(self, target):
@@ -329,7 +336,7 @@ class SR830M():
         if type(target) is str:
             res = np.argwhere(self.tauDF.tstr == target)
             if res.shape[0] < 1:
-                print("[SR830M] Requested time constant string is invalid.")
+                self.logger.error("Requested time constant string is invalid.")
                 return -1
             else:
                 i = self.tauDF.i[res[0,0]]
@@ -341,10 +348,10 @@ class SR830M():
                 self.device.write(f"OFLT {target}")
                 return self.tauDF.t[np.argwhere(self.tauDF.i == target)[0,0]]
             else:
-                print("[SR830M] Requested time constant index is invalid.")
+                self.logger.error("Requested time constant index is invalid.")
                 return -1
         else:
-            print("[SR830M] Time constant input type is invalid.")
+            self.logger.error("Time constant input type is invalid.")
             return -1
 
     def setTauS(self, target):
@@ -403,7 +410,7 @@ class SR830M():
             self.device.write(f"FREQ {freq}")
             return True
         else:
-            print("[SR830M] Requested LO frequency is out of bounds.")
+            self.logger.error("Requested LO frequency is out of bounds.")
             return False
 
     def getFreq(self):
@@ -438,7 +445,7 @@ class SR830M():
             self.device.write(f"ISRC {mode}")
             return True
         else:
-            print("[SR830M] Input mode must be one of [0, 1, 2, 3].")
+            self.logger.error("Input mode must be one of [0, 1, 2, 3].")
             return False
 
     def getInputMode(self):
@@ -502,7 +509,7 @@ class SR830M():
         """
         
         if disp not in [1, 2]:
-            print("Please select display 1 or 2.")
+            self.logger.error("Please select display 1 or 2.")
             return False
         
         dispDict = self.disp1Dict if disp == 1 else self.disp2Dict
@@ -515,7 +522,7 @@ class SR830M():
             return True
         else:
             available = ", ".join(dispDict.keys())
-            print(f"The requested value is invalid. Request: {target}. Available values: {available}")
+            self.logger.error(f"The requested value is invalid. Request: {target}. Available values: {available}")
             return False
 
     def getDisplay(self):
@@ -527,10 +534,10 @@ class SR830M():
             params = [params]
             
         if len(params) > 6:
-            print("At most 6 parameters may be read out at once.")
+            self.logger.error("At most 6 parameters may be read out at once.")
             return None
         elif len(params) < 1:
-            print("At least one parameter must be read out.")
+            self.logger.error("At least one parameter must be read out.")
             return None
         
         indices = []
@@ -540,21 +547,21 @@ class SR830M():
                 indices.append(str(self.snapDict[P]))
             else:
                 available = ", ".join(self.snapDict.keys())
-                print(f"A requested value is invalid. Request: {P}. Available values: {available}")
+                self.logger.error(f"A requested value is invalid. Request: {P}. Available values: {available}")
                 return 0
         
         if len(indices) == 1:
             indices.append(indices[0])
             joined = ",".join(indices)
             cmd = "SNAP? " + joined
-            #print(cmd)
+            #self.logger.info(cmd)
             resp = self.device.query(cmd)
             return list(map(float, resp.split(',')))[0:1]
 
         else:
             joined = ",".join(indices)
             cmd = "SNAP? " + joined
-            #print(cmd)
+            #self.logger.info(cmd)
             resp = self.device.query(cmd)
             return list(map(float, resp.split(',')))
     
@@ -606,11 +613,11 @@ class SR830M():
             numPoints = bufferSize - firstPoint
 
         if (firstPoint >= bufferSize) or (firstPoint < 0):
-            #logging.warning(f"Starting index is out of bounds (requested index {firstPoint} from {bufferSize} elements)")
+            self.logger.error(f"Starting index is out of bounds (requested index {firstPoint} from {bufferSize} elements)")
             return None
 
         if (firstPoint + numPoints) > bufferSize:
-            #logging.info("Requested too many points, clamping it.")
+            self.logger.info("Requested too many points, clamping it.")
             numPoints = bufferSize - firstPoint
 
         if self.serial:
@@ -629,7 +636,7 @@ class SR830M():
     def pauseBuffer(self):
         self.device.write("PAUS")
 
-    def enableBuffer(self, state = True):
+    def enableTrigger(self, state = True):
         if state:
             self.device.write("TSTR 1")
         else:
@@ -683,14 +690,14 @@ class SR830M():
         else:
             srate = self.setSamplerateHz(srate)
             
-        print(f"[SR830M] Sample rate is {srate}")
+        self.logger.info(f"Sample rate is {srate}")
             
         if srate <= 0:
-            print("[SR830M] Failed to set sample rate for acqusition.")
+            self.logger.error("Failed to set sample rate for acqusition.")
             return None, None
         
         if 1/srate > t:
-            print("[SR830M] Sampling is too slow for the selected time period.")
+            self.logger.error("Sampling is too slow for the selected time period.")
             return None, None
         
         n = np.floor(srate * t)

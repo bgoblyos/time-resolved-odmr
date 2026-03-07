@@ -17,7 +17,7 @@ import pyvisa
 import pandas as pd
 import numpy as np
 import time
-from tqdm import tqdm
+from tqdm.notebook import tqdm
 from Devices.LockIn import SR830M
 from Devices.PicoPulse import PicoPulse
 
