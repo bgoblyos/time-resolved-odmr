@@ -629,7 +629,7 @@ class SR830M():
     def pauseBuffer(self):
         self.device.write("PAUS")
 
-    def enableBuffer(self, state = True):
+    def enableTrigger(self, state = True):
         if state:
             self.device.write("TSTR 1")
         else:
